@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GrapeTree WebAssembly - Phylogenetic Tree Visualization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header p {
+            opacity: 0.9;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .controls-panel {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .control-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #555;
+        }
+        
+        .control-group select,
+        .control-group input[type="file"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+        
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+        
+        .visualization-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            min-height: 600px;
+        }
+        
+        #tree-canvas {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+        
+        .status-bar {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .status-info {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 1rem 0;
+            display: none;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s;
+            animation: progress 1.5s infinite;
+        }
+        
+        @keyframes progress {
+            0% { width: 0%; }
+            50% { width: 70%; }
+            100% { width: 100%; }
+        }
+        
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+        
+        .info-panel {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 4px;
+            margin-top: 2rem;
+        }
+        
+        .info-panel h3 {
+            margin-bottom: 1rem;
+            color: #667eea;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .info-item {
+            padding: 1rem;
+            background: white;
+            border-radius: 4px;
+        }
+        
+        .info-item strong {
+            display: block;
+            color: #666;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .info-item span {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🍇 GrapeTree WebAssembly</h1>
+        <p>Interactive phylogenetic tree visualization - Powered by WebAssembly</p>
+    </div>
+    
+    <div class="container">
+        <div class="controls-panel">
+            <h2 style="margin-bottom: 1.5rem;">Tree Configuration</h2>
+            
+            <div class="error-message" id="error-message"></div>
+            
+            <div class="progress-bar" id="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+            
+            <div class="control-group">
+                <label for="file-input">Upload Data File</label>
+                <input type="file" id="file-input" accept=".txt,.csv,.tsv,.fasta,.fa,.json">
+                <small style="color: #999; margin-top: 0.5rem; display: block;">
+                    Supported: MLST/cgMLST profiles (.txt, .csv), aligned FASTA (.fasta), or JSON
+                </small>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                <div class="control-group">
+                    <label for="method-select">Tree Method</label>
+                    <select id="method-select">
+                        <option value="MSTreeV2" selected>MSTreeV2 (Recommended)</option>
+                        <option value="MSTree">MSTree (Classical)</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="matrix-select">Matrix Type</label>
+                    <select id="matrix-select">
+                        <option value="asymmetric" selected>Asymmetric</option>
+                        <option value="symmetric">Symmetric</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="missing-select">Missing Data</label>
+                    <select id="missing-select">
+                        <option value="0" selected>Ignore</option>
+                        <option value="1">Remove Column</option>
+                        <option value="2">Treat as Allele</option>
+                        <option value="3">Absolute Difference</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="heuristic-select">Tiebreak Heuristic</label>
+                    <select id="heuristic-select">
+                        <option value="harmonic" selected>Harmonic Mean</option>
+                        <option value="eBurst">eBurst</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="button-group" style="margin-top: 1.5rem;">
+                <button class="btn-primary" id="compute-btn">Compute Tree</button>
+                <button class="btn-secondary" id="download-newick-btn">Download Newick</button>
+                <button class="btn-secondary" id="download-svg-btn">Download SVG</button>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <div class="status-info" id="status-info">
+                Ready to load data
+            </div>
+        </div>
+        
+        <div class="visualization-container">
+            <div id="tree-canvas">
+                <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #999;">
+                    <div style="text-align: center;">
+                        <h3>No tree computed yet</h3>
+                        <p style="margin-top: 1rem;">Upload a data file and click "Compute Tree" to get started</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-panel" id="tree-info" style="display: none;">
+            <h3>Tree Statistics</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Number of Nodes</strong>
+                    <span id="stat-nodes">-</span>
+                </div>
+                <div class="info-item">
+                    <strong>Number of Edges</strong>
+                    <span id="stat-edges">-</span>
+                </div>
+                <div class="info-item">
+                    <strong>Computation Time</strong>
+                    <span id="stat-time">-</span>
+                </div>
+                <div class="info-item">
+                    <strong>Tree Method</strong>
+                    <span id="stat-method" style="font-size: 1.2rem;">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import GrapeTreeWASM from './wasm_loader.js';
+        import FileHandler from './file_handler.js';
+        
+        // Initialize application
+        let grapetree = null;
+        let fileHandler = new FileHandler();
+        let currentData = null;
+        let currentTree = null;
+        
+        // DOM elements
+        const fileInput = document.getElementById('file-input');
+        const computeBtn = document.getElementById('compute-btn');
+        const downloadNewickBtn = document.getElementById('download-newick-btn');
+        const statusInfo = document.getElementById('status-info');
+        const errorMessage = document.getElementById('error-message');
+        const progressBar = document.getElementById('progress-bar');
+        const treeInfo = document.getElementById('tree-info');
+        
+        // Initialize WASM
+        async function init() {
+            try {
+                statusInfo.textContent = 'Initializing WebAssembly module...';
+                grapetree = new GrapeTreeWASM();
+                await grapetree.init();
+                statusInfo.textContent = 'Ready to load data';
+                console.log('GrapeTree WASM initialized');
+            } catch (error) {
+                showError('Failed to initialize: ' + error.message);
+            }
+        }
+        
+        // File upload handler
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                statusInfo.textContent = `Loading ${file.name}...`;
+                currentData = await fileHandler.parse(file);
+                statusInfo.textContent = 
+                    `Loaded ${currentData.strains.length} strains with ` +
+                    `${currentData.profiles[0].length} loci`;
+                computeBtn.disabled = false;
+            } catch (error) {
+                showError('Failed to parse file: ' + error.message);
+            }
+        });
+        
+        // Compute tree
+        computeBtn.addEventListener('click', async () => {
+            if (!currentData) {
+                showError('Please load a data file first');
+                return;
+            }
+            
+            try {
+                hideError();
+                showProgress();
+                
+                const method = document.getElementById('method-select').value;
+                const matrix = document.getElementById('matrix-select').value;
+                const missing = parseInt(document.getElementById('missing-select').value);
+                const heuristic = document.getElementById('heuristic-select').value;
+                
+                statusInfo.textContent = `Computing ${method} tree...`;
+                const startTime = performance.now();
+                
+                currentTree = grapetree.computeTree({
+                    data: currentData,
+                    method,
+                    matrix,
+                    missing,
+                    heuristic
+                });
+                
+                const endTime = performance.now();
+                const duration = ((endTime - startTime) / 1000).toFixed(2);
+                
+                hideProgress();
+                statusInfo.textContent = 
+                    `Tree computed in ${duration}s - ${currentTree.nNodes} nodes, ` +
+                    `${currentTree.nEdges} edges`;
+                
+                // Update statistics
+                document.getElementById('stat-nodes').textContent = currentTree.nNodes;
+                document.getElementById('stat-edges').textContent = currentTree.nEdges;
+                document.getElementById('stat-time').textContent = duration + 's';
+                document.getElementById('stat-method').textContent = method;
+                treeInfo.style.display = 'block';
+                
+                // Enable download buttons
+                downloadNewickBtn.disabled = false;
+                
+                // Display tree (placeholder - would integrate D3.js visualization)
+                displayTree(currentTree);
+                
+            } catch (error) {
+                hideProgress();
+                showError('Tree computation failed: ' + error.message);
+            }
+        });
+        
+        // Download Newick
+        downloadNewickBtn.addEventListener('click', () => {
+            if (!currentTree) return;
+            
+            const newick = grapetree.exportNewick(currentTree);
+            downloadFile(newick, 'tree.nwk', 'text/plain');
+        });
+        
+        // Helper functions
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+        
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+        
+        function showProgress() {
+            progressBar.style.display = 'block';
+        }
+        
+        function hideProgress() {
+            progressBar.style.display = 'none';
+        }
+        
+        function displayTree(tree) {
+            const canvas = document.getElementById('tree-canvas');
+            canvas.innerHTML = `
+                <div style="padding: 2rem; text-align: center;">
+                    <h3 style="color: #667eea;">✓ Tree Computed Successfully</h3>
+                    <p style="margin-top: 1rem; color: #666;">
+                        ${tree.nNodes} nodes, ${tree.nEdges} edges
+                    </p>
+                    <pre style="margin-top: 1rem; text-align: left; background: #f5f5f5; 
+                                padding: 1rem; border-radius: 4px; overflow-x: auto; 
+                                max-height: 400px;">
+${tree.newick.substring(0, 500)}${tree.newick.length > 500 ? '...' : ''}
+                    </pre>
+                    <p style="margin-top: 1rem; color: #999; font-size: 0.9rem;">
+                        D3.js visualization would render here
+                    </p>
+                </div>
+            `;
+        }
+        
+        function downloadFile(content, filename, type) {
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
