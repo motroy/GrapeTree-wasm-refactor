@@ -69,15 +69,16 @@ test: $(OUTPUT_JS)
 # Serve locally for testing
 serve:
 	@echo "Starting local server on http://localhost:8080"
-	@cd web && python3 -m http.server 8080
+	@cd src/web && python3 -m http.server 8080
 
 # Build everything needed for deployment
 deploy: production
 	@echo "Preparing deployment..."
-	@cp $(OUTPUT_JS) web/
-	@cp $(OUTPUT_WASM) web/
-	@echo "✓ Files copied to web/ directory"
-	@echo "Deploy the contents of the web/ directory"
+	@cp $(OUTPUT_JS) src/web/
+	@cp $(OUTPUT_WASM) src/web/
+	@cp src/js/*.js src/web/
+	@echo "✓ Files copied to src/web/ directory"
+	@echo "Deploy the contents of the src/web/ directory"
 
 # Print build info
 info:
