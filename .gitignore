@@ -1,0 +1,5 @@
+emsdk/
+build/
+*.log
+test_profile.tsv
+verification/

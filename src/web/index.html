@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GrapeTree WebAssembly - Phylogenetic Tree Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -449,22 +450,125 @@
         
         function displayTree(tree) {
             const canvas = document.getElementById('tree-canvas');
-            canvas.innerHTML = `
-                <div style="padding: 2rem; text-align: center;">
-                    <h3 style="color: #667eea;">✓ Tree Computed Successfully</h3>
-                    <p style="margin-top: 1rem; color: #666;">
-                        ${tree.nNodes} nodes, ${tree.nEdges} edges
-                    </p>
-                    <pre style="margin-top: 1rem; text-align: left; background: #f5f5f5; 
-                                padding: 1rem; border-radius: 4px; overflow-x: auto; 
-                                max-height: 400px;">
-${tree.newick.substring(0, 500)}${tree.newick.length > 500 ? '...' : ''}
-                    </pre>
-                    <p style="margin-top: 1rem; color: #999; font-size: 0.9rem;">
-                        D3.js visualization would render here
-                    </p>
+            canvas.innerHTML = '';
+
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+
+            // Prepare graph data
+            const nodes = currentData.strains.map((name, i) => ({ id: i, name: name }));
+            const links = tree.edges.map(e => ({ source: e.from, target: e.to, distance: e.distance }));
+
+            // Create SVG
+            const svg = d3.select('#tree-canvas')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', [0, 0, width, height])
+                .style('max-width', '100%')
+                .style('height', 'auto');
+
+            // Add zoom
+            const g = svg.append('g');
+            svg.call(d3.zoom()
+                .extent([[0, 0], [width, height]])
+                .scaleExtent([0.1, 8])
+                .on('zoom', ({transform}) => g.attr('transform', transform)));
+
+            // Simulation
+            const simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(d => Math.max(20, d.distance * 10)))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2));
+
+            // Draw links
+            const link = g.append('g')
+                .attr('stroke', '#999')
+                .attr('stroke-opacity', 0.6)
+                .selectAll('line')
+                .data(links)
+                .join('line')
+                .attr('stroke-width', 2);
+
+            // Draw nodes
+            const node = g.append('g')
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 1.5)
+                .selectAll('circle')
+                .data(nodes)
+                .join('circle')
+                .attr('r', 8)
+                .attr('fill', '#667eea')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            // Add labels
+            const label = g.append('g')
+                .selectAll('text')
+                .data(nodes)
+                .join('text')
+                .attr('dx', 12)
+                .attr('dy', '.35em')
+                .text(d => d.name)
+                .style('font-size', '12px')
+                .style('fill', '#333')
+                .style('pointer-events', 'none');
+
+            node.append('title')
+                .text(d => d.name);
+
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node
+                    .attr('cx', d => d.x)
+                    .attr('cy', d => d.y);
+
+                label
+                    .attr('x', d => d.x)
+                    .attr('y', d => d.y);
+            });
+
+            function dragstarted(event) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                event.subject.fx = event.subject.x;
+                event.subject.fy = event.subject.y;
+            }
+
+            function dragged(event) {
+                event.subject.fx = event.x;
+                event.subject.fy = event.y;
+            }
+
+            function dragended(event) {
+                if (!event.active) simulation.alphaTarget(0);
+                event.subject.fx = null;
+                event.subject.fy = null;
+            }
+
+            // Add success message overlay
+            const overlay = document.createElement('div');
+            overlay.style.position = 'absolute';
+            overlay.style.top = '10px';
+            overlay.style.left = '10px';
+            overlay.style.background = 'rgba(255, 255, 255, 0.9)';
+            overlay.style.padding = '10px';
+            overlay.style.borderRadius = '4px';
+            overlay.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+            overlay.innerHTML = `
+                <h4 style="color: #667eea; margin: 0;">✓ Tree Computed</h4>
+                <div style="font-size: 0.8rem; color: #666; margin-top: 4px;">
+                    ${tree.nNodes} nodes, ${tree.nEdges} edges
                 </div>
             `;
+            canvas.style.position = 'relative';
+            canvas.appendChild(overlay);
         }
         
         function downloadFile(content, filename, type) {
