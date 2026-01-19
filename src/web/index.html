@@ -234,6 +234,14 @@
                     Supported: MLST/cgMLST profiles (.txt, .csv), aligned FASTA (.fasta), or JSON
                 </small>
             </div>
+
+            <div class="control-group">
+                <label for="metadata-input">Upload Metadata (Optional)</label>
+                <input type="file" id="metadata-input" accept=".txt,.csv,.tsv">
+                <small style="color: #999; margin-top: 0.5rem; display: block;">
+                    Supported: Tab or comma delimited files with ID column
+                </small>
+            </div>
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
                 <div class="control-group">
@@ -269,11 +277,19 @@
                         <option value="eBurst">eBurst</option>
                     </select>
                 </div>
+
+                <div class="control-group">
+                    <label for="color-select">Color By</label>
+                    <select id="color-select" disabled>
+                        <option value="">None (Default)</option>
+                    </select>
+                </div>
             </div>
             
             <div class="button-group" style="margin-top: 1.5rem;">
                 <button class="btn-primary" id="compute-btn">Compute Tree</button>
                 <button class="btn-secondary" id="download-newick-btn">Download Newick</button>
+                <button class="btn-secondary" id="download-json-btn">Download GrapeTree JSON</button>
                 <button class="btn-secondary" id="download-svg-btn">Download SVG</button>
             </div>
         </div>
@@ -327,12 +343,16 @@
         let grapetree = null;
         let fileHandler = new FileHandler();
         let currentData = null;
+        let currentMetadata = null;
         let currentTree = null;
         
         // DOM elements
         const fileInput = document.getElementById('file-input');
+        const metadataInput = document.getElementById('metadata-input');
         const computeBtn = document.getElementById('compute-btn');
         const downloadNewickBtn = document.getElementById('download-newick-btn');
+        const downloadJsonBtn = document.getElementById('download-json-btn');
+        const colorSelect = document.getElementById('color-select');
         const statusInfo = document.getElementById('status-info');
         const errorMessage = document.getElementById('error-message');
         const progressBar = document.getElementById('progress-bar');
@@ -365,6 +385,46 @@
                 computeBtn.disabled = false;
             } catch (error) {
                 showError('Failed to parse file: ' + error.message);
+            }
+        });
+
+        // Metadata upload handler
+        metadataInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                statusInfo.textContent = `Loading metadata ${file.name}...`;
+                const content = await fileHandler._readFile(file);
+                const result = fileHandler.parseMetadata(content);
+                currentMetadata = result.metadata;
+
+                // Populate color select
+                colorSelect.innerHTML = '<option value="">None (Default)</option>';
+                result.fields.forEach(field => {
+                    const option = document.createElement('option');
+                    option.value = field;
+                    option.textContent = field;
+                    colorSelect.appendChild(option);
+                });
+                colorSelect.disabled = false;
+
+                statusInfo.textContent = `Loaded metadata for ${Object.keys(currentMetadata).length} strains`;
+
+                // Re-render if tree exists
+                if (currentTree) {
+                    displayTree(currentTree);
+                }
+
+            } catch (error) {
+                showError('Failed to parse metadata: ' + error.message);
+            }
+        });
+
+        // Color selection handler
+        colorSelect.addEventListener('change', () => {
+            if (currentTree) {
+                displayTree(currentTree);
             }
         });
         
@@ -412,6 +472,7 @@
                 
                 // Enable download buttons
                 downloadNewickBtn.disabled = false;
+                downloadJsonBtn.disabled = false;
                 
                 // Display tree (placeholder - would integrate D3.js visualization)
                 displayTree(currentTree);
@@ -428,6 +489,46 @@
             
             const newick = grapetree.exportNewick(currentTree);
             downloadFile(newick, 'tree.nwk', 'text/plain');
+        });
+
+        // Download GrapeTree JSON
+        downloadJsonBtn.addEventListener('click', () => {
+            if (!currentTree || !currentData) return;
+
+            const json = {
+                metadata: {},
+                tree: currentTree.newick,
+                initialTree: currentTree.newick
+            };
+
+            // Populate metadata
+            // Format: ID: [val1, val2, ...]
+            // But GrapeTree JSON usually has metadata as:
+            // "metadata": { "ID": { "col": "val", ... } } ??
+            // No, GrapeTree standard JSON usually stores metadata in a specific way.
+            // But usually for GrapeTree standalone, the "metadata" key in JSON file contains lines from the profile + metadata.
+
+            // For simplicity, we can create a JSON structure compatible with what GrapeTree expects if possible,
+            // or just a JSON dump of what we have.
+            // The user requested "GrapeTree .json file".
+            // The format usually includes a "metadata" object where keys are strain names and values are objects/arrays.
+
+            // Let's assume a simple format:
+            // metadata: { "strain1": { "col1": "val1" }, ... }
+
+            // We should merge profile data and external metadata.
+
+            currentData.strains.forEach((strain, i) => {
+                json.metadata[strain] = {};
+                // Add profile data? Usually not necessary if tree is there, but useful.
+                // But GrapeTree often uses metadata for coloring.
+
+                if (currentMetadata && currentMetadata[strain]) {
+                    Object.assign(json.metadata[strain], currentMetadata[strain]);
+                }
+            });
+
+            downloadFile(JSON.stringify(json, null, 2), 'grapetree.json', 'application/json');
         });
         
         // Helper functions
@@ -482,13 +583,23 @@
                 .force('center', d3.forceCenter(width / 2, height / 2));
 
             // Draw links
-            const link = g.append('g')
+            const linkGroup = g.append('g').selectAll('g').data(links).join('g');
+
+            const link = linkGroup.append('line')
                 .attr('stroke', '#999')
                 .attr('stroke-opacity', 0.6)
-                .selectAll('line')
-                .data(links)
-                .join('line')
                 .attr('stroke-width', 2);
+
+            // Edge distances labels
+            const linkLabel = linkGroup.append('text')
+                .attr('font-size', '10px')
+                .attr('fill', '#666')
+                .attr('text-anchor', 'middle')
+                .text(d => d.distance > 0 ? d.distance.toFixed(1) : "");
+
+            // Color scale
+            const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+            const selectedColumn = colorSelect.value;
 
             // Draw nodes
             const node = g.append('g')
@@ -498,7 +609,12 @@
                 .data(nodes)
                 .join('circle')
                 .attr('r', 8)
-                .attr('fill', '#667eea')
+                .attr('fill', d => {
+                    if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
+                        return colorScale(currentMetadata[d.name][selectedColumn]);
+                    }
+                    return '#667eea';
+                })
                 .call(d3.drag()
                     .on('start', dragstarted)
                     .on('drag', dragged)
@@ -517,7 +633,13 @@
                 .style('pointer-events', 'none');
 
             node.append('title')
-                .text(d => d.name);
+                .text(d => {
+                    let text = d.name;
+                    if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
+                        text += `\n${selectedColumn}: ${currentMetadata[d.name][selectedColumn]}`;
+                    }
+                    return text;
+                });
 
             simulation.on('tick', () => {
                 link
@@ -525,6 +647,10 @@
                     .attr('y1', d => d.source.y)
                     .attr('x2', d => d.target.x)
                     .attr('y2', d => d.target.y);
+
+                linkLabel
+                    .attr('x', d => (d.source.x + d.target.x) / 2)
+                    .attr('y', d => (d.source.y + d.target.y) / 2);
 
                 node
                     .attr('cx', d => d.x)
