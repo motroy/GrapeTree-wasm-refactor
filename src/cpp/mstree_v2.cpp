@@ -10,6 +10,8 @@
 #include <numeric>
 #include <set>
 #include <queue>
+#include <map>
+#include <utility>
 
 namespace grapetree {
 
@@ -200,7 +202,7 @@ private:
             }
         }
         
-        // Build contracted distance matrix
+        // Build contracted distance matrix and edge mapping
         int new_size = next_node;
         std::vector<std::vector<double>> new_distances(
             new_size,
@@ -208,6 +210,10 @@ private:
                                std::numeric_limits<double>::max())
         );
         
+        // Map: (contracted_from, contracted_to) -> Original Edge
+        // We use int pair for key as Edge might not be comparable
+        std::map<std::pair<int, int>, Edge> edge_mapping;
+
         for (int i = 0; i < n_nodes_; ++i) {
             for (int j = 0; j < n_nodes_; ++j) {
                 if (i == j) continue;
@@ -216,10 +222,28 @@ private:
                 int nj = node_mapping[j];
                 
                 if (ni != nj) {
-                    new_distances[ni][nj] = std::min(
-                        new_distances[ni][nj],
-                        distance_matrix_[i][j]
-                    );
+                    double dist = distance_matrix_[i][j];
+                    double reduced_dist = dist;
+
+                    // If target is in a cycle, reduce weight
+                    if (cycle_id[j] != -1) {
+                        double cycle_edge_weight = 0;
+                        for(const auto& e : edges) {
+                            if (e.to == j) {
+                                cycle_edge_weight = e.distance;
+                                break;
+                            }
+                        }
+                        reduced_dist -= cycle_edge_weight;
+                    }
+
+                    if (reduced_dist < new_distances[ni][nj]) {
+                        new_distances[ni][nj] = reduced_dist;
+                        // We construct Edge manually to avoid needing default constructor if it doesn't have one
+                        // But Edge structure is simple struct in mstree.cpp
+                        edge_mapping.erase({ni, nj});
+                        edge_mapping.insert({{ni, nj}, Edge(i, j, dist)});
+                    }
                 }
             }
         }
@@ -229,12 +253,30 @@ private:
         std::vector<Edge> contracted_edges = contracted_solver.compute();
         
         // Expand solution back to original graph
-        std::vector<Edge> expanded_edges = edges; // Start with original
+        std::vector<Edge> final_edges;
+        std::set<int> nodes_with_incoming_edges;
+
+        // 1. Add inter-component edges from contracted solution
+        for (const auto& e : contracted_edges) {
+            if (edge_mapping.count({e.from, e.to})) {
+                Edge original = edge_mapping.at({e.from, e.to});
+                final_edges.push_back(original);
+                nodes_with_incoming_edges.insert(original.to);
+            }
+        }
         
-        // Replace contracted edges
-        // (Simplified - full implementation would need careful expansion)
+        // 2. Add intra-component edges (breaking cycles)
+        for (const auto& e : edges) {
+            // Check if this is an edge within a cycle
+            if (cycle_id[e.from] != -1 && cycle_id[e.from] == cycle_id[e.to]) {
+                // If e.to already has an incoming edge from outside, skip this cycle edge
+                if (nodes_with_incoming_edges.find(e.to) == nodes_with_incoming_edges.end()) {
+                    final_edges.push_back(e);
+                }
+            }
+        }
         
-        return expanded_edges;
+        return final_edges;
     }
     
     // Local branch recrafting to improve tree quality
