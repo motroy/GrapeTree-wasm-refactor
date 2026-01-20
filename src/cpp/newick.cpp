@@ -34,22 +34,45 @@ public:
         if (edges.empty()) {
             return strain_names.empty() ? "();" : strain_names[0] + ";";
         }
-        
+
         // Build tree structure
         std::vector<TreeNode> nodes = build_tree_structure(
             edges,
             strain_names.size()
         );
-        
-        // Find root (node with no parent or most children)
-        int root = find_root(nodes);
-        
+
+        // Find all root nodes (nodes with no parent)
+        std::vector<int> roots;
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            if (nodes[i].parent == -1) {
+                roots.push_back(i);
+            }
+        }
+
         // Generate Newick string recursively
         std::ostringstream oss;
         oss << std::fixed << std::setprecision(6);
-        oss << to_newick(root, nodes, strain_names);
+
+        if (roots.empty()) {
+            // No roots found (shouldn't happen, but handle gracefully)
+            return strain_names.empty() ? "();" : strain_names[0] + ";";
+        } else if (roots.size() == 1) {
+            // Single connected tree - standard case
+            oss << to_newick(roots[0], nodes, strain_names);
+        } else {
+            // Multiple disconnected components - create artificial root
+            oss << "(";
+
+            for (size_t i = 0; i < roots.size(); ++i) {
+                if (i > 0) oss << ",";
+                oss << to_newick(roots[i], nodes, strain_names) << ":0.0";
+            }
+
+            oss << ")";
+        }
+
         oss << ";";
-        
+
         return oss.str();
     }
     
