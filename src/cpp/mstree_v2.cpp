@@ -264,18 +264,26 @@ private:
                 nodes_with_incoming_edges.insert(original.to);
             }
         }
-        
-        // 2. Add intra-component edges (breaking cycles)
+
+        // 2. Add edges for all remaining nodes (both in cycles and not in cycles)
         for (const auto& e : edges) {
+            // Skip if this node already has an incoming edge
+            if (nodes_with_incoming_edges.find(e.to) != nodes_with_incoming_edges.end()) {
+                continue;
+            }
+
             // Check if this is an edge within a cycle
             if (cycle_id[e.from] != -1 && cycle_id[e.from] == cycle_id[e.to]) {
-                // If e.to already has an incoming edge from outside, skip this cycle edge
-                if (nodes_with_incoming_edges.find(e.to) == nodes_with_incoming_edges.end()) {
-                    final_edges.push_back(e);
-                }
+                // Add intra-cycle edge
+                final_edges.push_back(e);
+                nodes_with_incoming_edges.insert(e.to);
+            } else if (cycle_id[e.to] == -1) {
+                // Node is not in a cycle - add its original edge
+                final_edges.push_back(e);
+                nodes_with_incoming_edges.insert(e.to);
             }
         }
-        
+
         return final_edges;
     }
     

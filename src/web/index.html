@@ -209,6 +209,50 @@
             font-weight: 700;
             color: #667eea;
         }
+
+        .legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            max-width: 250px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            z-index: 100;
+        }
+
+        .legend-title {
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 5px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 6px 0;
+            gap: 8px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            border: 1px solid #ddd;
+            flex-shrink: 0;
+        }
+
+        .legend-label {
+            flex: 1;
+            color: #555;
+            word-break: break-word;
+        }
     </style>
 </head>
 <body>
@@ -284,6 +328,14 @@
                         <option value="">None (Default)</option>
                     </select>
                 </div>
+
+                <div class="control-group">
+                    <label for="edge-scale-select">Edge Distance Scale</label>
+                    <select id="edge-scale-select">
+                        <option value="linear" selected>Linear</option>
+                        <option value="log">Logarithmic</option>
+                    </select>
+                </div>
             </div>
             
             <div class="button-group" style="margin-top: 1.5rem;">
@@ -353,6 +405,7 @@
         const downloadNewickBtn = document.getElementById('download-newick-btn');
         const downloadJsonBtn = document.getElementById('download-json-btn');
         const colorSelect = document.getElementById('color-select');
+        const edgeScaleSelect = document.getElementById('edge-scale-select');
         const statusInfo = document.getElementById('status-info');
         const errorMessage = document.getElementById('error-message');
         const progressBar = document.getElementById('progress-bar');
@@ -423,6 +476,13 @@
 
         // Color selection handler
         colorSelect.addEventListener('change', () => {
+            if (currentTree) {
+                displayTree(currentTree);
+            }
+        });
+
+        // Edge scale selection handler
+        edgeScaleSelect.addEventListener('change', () => {
             if (currentTree) {
                 displayTree(currentTree);
             }
@@ -560,6 +620,31 @@
             const nodes = currentData.strains.map((name, i) => ({ id: i, name: name }));
             const links = tree.edges.map(e => ({ source: e.from, target: e.to, distance: e.distance }));
 
+            // Get selected options
+            const selectedColumn = colorSelect.value;
+            const edgeScale = edgeScaleSelect.value;
+
+            // Build color scale with all unique values
+            let colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+            let uniqueValues = new Set();
+            let colorMapping = {};
+
+            if (selectedColumn && currentMetadata) {
+                // Collect all unique values for the selected column
+                Object.keys(currentMetadata).forEach(strain => {
+                    if (currentMetadata[strain] && currentMetadata[strain][selectedColumn]) {
+                        const value = currentMetadata[strain][selectedColumn];
+                        uniqueValues.add(value);
+                    }
+                });
+
+                // Create stable color mapping
+                const sortedValues = Array.from(uniqueValues).sort();
+                sortedValues.forEach((value, idx) => {
+                    colorMapping[value] = colorScale(idx);
+                });
+            }
+
             // Create SVG
             const svg = d3.select('#tree-canvas')
                 .append('svg')
@@ -576,9 +661,14 @@
                 .scaleExtent([0.1, 8])
                 .on('zoom', ({transform}) => g.attr('transform', transform)));
 
+            // Calculate edge distances based on scale
+            const distanceFunction = edgeScale === 'log'
+                ? (d) => Math.max(20, Math.log(d.distance + 1) * 30)
+                : (d) => Math.max(20, d.distance * 10);
+
             // Simulation
             const simulation = d3.forceSimulation(nodes)
-                .force('link', d3.forceLink(links).id(d => d.id).distance(d => Math.max(20, d.distance * 10)))
+                .force('link', d3.forceLink(links).id(d => d.id).distance(distanceFunction))
                 .force('charge', d3.forceManyBody().strength(-300))
                 .force('center', d3.forceCenter(width / 2, height / 2));
 
@@ -597,11 +687,7 @@
                 .attr('text-anchor', 'middle')
                 .text(d => d.distance > 0 ? d.distance.toFixed(1) : "");
 
-            // Color scale
-            const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
-            const selectedColumn = colorSelect.value;
-
-            // Draw nodes
+            // Draw nodes with proper coloring
             const node = g.append('g')
                 .attr('stroke', '#fff')
                 .attr('stroke-width', 1.5)
@@ -611,7 +697,10 @@
                 .attr('r', 8)
                 .attr('fill', d => {
                     if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
-                        return colorScale(currentMetadata[d.name][selectedColumn]);
+                        const value = currentMetadata[d.name][selectedColumn];
+                        if (value && colorMapping[value]) {
+                            return colorMapping[value];
+                        }
                     }
                     return '#667eea';
                 })
@@ -636,7 +725,10 @@
                 .text(d => {
                     let text = d.name;
                     if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
-                        text += `\n${selectedColumn}: ${currentMetadata[d.name][selectedColumn]}`;
+                        const value = currentMetadata[d.name][selectedColumn];
+                        if (value) {
+                            text += `\n${selectedColumn}: ${value}`;
+                        }
                     }
                     return text;
                 });
@@ -676,6 +768,28 @@
                 if (!event.active) simulation.alphaTarget(0);
                 event.subject.fx = null;
                 event.subject.fy = null;
+            }
+
+            // Add legend if metadata coloring is active
+            if (selectedColumn && uniqueValues.size > 0) {
+                const legend = document.createElement('div');
+                legend.className = 'legend';
+
+                let legendHTML = `<div class="legend-title">${selectedColumn}</div>`;
+
+                const sortedValues = Array.from(uniqueValues).sort();
+                sortedValues.forEach(value => {
+                    const color = colorMapping[value];
+                    legendHTML += `
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: ${color}"></div>
+                            <div class="legend-label">${value}</div>
+                        </div>
+                    `;
+                });
+
+                legend.innerHTML = legendHTML;
+                canvas.appendChild(legend);
             }
 
             // Add success message overlay
