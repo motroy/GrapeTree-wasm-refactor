@@ -265,20 +265,12 @@ private:
             }
         }
 
-        // 2. Add edges for all remaining nodes (both in cycles and not in cycles)
+        // 2. Add remaining edges for all nodes that don't have incoming edges yet
+        // This ensures every node (except root) has exactly one incoming edge
         for (const auto& e : edges) {
-            // Skip if this node already has an incoming edge
-            if (nodes_with_incoming_edges.find(e.to) != nodes_with_incoming_edges.end()) {
-                continue;
-            }
-
-            // Check if this is an edge within a cycle
-            if (cycle_id[e.from] != -1 && cycle_id[e.from] == cycle_id[e.to]) {
-                // Add intra-cycle edge
-                final_edges.push_back(e);
-                nodes_with_incoming_edges.insert(e.to);
-            } else if (cycle_id[e.to] == -1) {
-                // Node is not in a cycle - add its original edge
+            // Skip if this node already has an incoming edge from step 1
+            if (nodes_with_incoming_edges.find(e.to) == nodes_with_incoming_edges.end()) {
+                // Add this edge - it's the minimum incoming edge for this node
                 final_edges.push_back(e);
                 nodes_with_incoming_edges.insert(e.to);
             }
