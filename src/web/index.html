@@ -340,9 +340,13 @@
             
             <div class="button-group" style="margin-top: 1.5rem;">
                 <button class="btn-primary" id="compute-btn">Compute Tree</button>
+                <button class="btn-primary" id="compute-matrix-btn">Compute Distance Matrix</button>
+                <button class="btn-secondary" id="toggle-view-btn" style="display: none;">Toggle View</button>
                 <button class="btn-secondary" id="download-newick-btn">Download Newick</button>
                 <button class="btn-secondary" id="download-json-btn">Download GrapeTree JSON</button>
                 <button class="btn-secondary" id="download-svg-btn">Download SVG</button>
+                <button class="btn-secondary" id="download-matrix-tsv-btn" style="display: none;">Download Matrix (TSV)</button>
+                <button class="btn-secondary" id="download-heatmap-png-btn" style="display: none;">Download Heatmap (PNG)</button>
             </div>
         </div>
         
@@ -397,13 +401,19 @@
         let currentData = null;
         let currentMetadata = null;
         let currentTree = null;
+        let currentMatrix = null;
+        let currentView = 'tree'; // 'tree' or 'heatmap'
         
         // DOM elements
         const fileInput = document.getElementById('file-input');
         const metadataInput = document.getElementById('metadata-input');
         const computeBtn = document.getElementById('compute-btn');
+        const computeMatrixBtn = document.getElementById('compute-matrix-btn');
+        const toggleViewBtn = document.getElementById('toggle-view-btn');
         const downloadNewickBtn = document.getElementById('download-newick-btn');
         const downloadJsonBtn = document.getElementById('download-json-btn');
+        const downloadMatrixTsvBtn = document.getElementById('download-matrix-tsv-btn');
+        const downloadHeatmapPngBtn = document.getElementById('download-heatmap-png-btn');
         const colorSelect = document.getElementById('color-select');
         const edgeScaleSelect = document.getElementById('edge-scale-select');
         const statusInfo = document.getElementById('status-info');
@@ -589,6 +599,117 @@
             });
 
             downloadFile(JSON.stringify(json, null, 2), 'grapetree.json', 'application/json');
+        });
+
+        // Compute Distance Matrix
+        computeMatrixBtn.addEventListener('click', async () => {
+            if (!currentData) {
+                showError('Please load a data file first');
+                return;
+            }
+
+            try {
+                hideError();
+                showProgress();
+
+                const matrix = document.getElementById('matrix-select').value;
+                const missing = parseInt(document.getElementById('missing-select').value);
+
+                statusInfo.textContent = 'Computing distance matrix...';
+                const startTime = performance.now();
+
+                currentMatrix = grapetree.computeDistanceMatrix(currentData, matrix, missing);
+
+                const endTime = performance.now();
+                const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+                hideProgress();
+                statusInfo.textContent =
+                    `Distance matrix computed in ${duration}s - ${currentMatrix.nStrains}x${currentMatrix.nStrains} matrix`;
+
+                // Show download and view buttons
+                downloadMatrixTsvBtn.style.display = 'inline-block';
+                downloadHeatmapPngBtn.style.display = 'inline-block';
+                toggleViewBtn.style.display = 'inline-block';
+
+                // Display heatmap
+                currentView = 'heatmap';
+                displayHeatmap(currentMatrix);
+
+            } catch (error) {
+                hideProgress();
+                showError('Matrix computation failed: ' + error.message);
+            }
+        });
+
+        // Toggle between tree and heatmap view
+        toggleViewBtn.addEventListener('click', () => {
+            if (currentView === 'tree' && currentMatrix) {
+                currentView = 'heatmap';
+                displayHeatmap(currentMatrix);
+                toggleViewBtn.textContent = 'Show Tree';
+            } else if (currentView === 'heatmap' && currentTree) {
+                currentView = 'tree';
+                displayTree(currentTree);
+                toggleViewBtn.textContent = 'Show Heatmap';
+            }
+        });
+
+        // Download Distance Matrix as TSV
+        downloadMatrixTsvBtn.addEventListener('click', () => {
+            if (!currentMatrix) return;
+
+            let tsv = '\t' + currentMatrix.strainNames.join('\t') + '\n';
+            currentMatrix.matrix.forEach((row, i) => {
+                tsv += currentMatrix.strainNames[i] + '\t';
+                tsv += row.map(val => val.toFixed(2)).join('\t') + '\n';
+            });
+
+            downloadFile(tsv, 'distance_matrix.tsv', 'text/tab-separated-values');
+            statusInfo.textContent = 'Distance matrix downloaded as TSV';
+        });
+
+        // Download Heatmap as PNG
+        downloadHeatmapPngBtn.addEventListener('click', () => {
+            if (!currentMatrix || currentView !== 'heatmap') {
+                showError('Please display the heatmap first');
+                return;
+            }
+
+            const canvas = document.getElementById('tree-canvas');
+            const svg = canvas.querySelector('svg');
+            if (!svg) {
+                showError('No heatmap to download');
+                return;
+            }
+
+            // Create a canvas element
+            const svgString = new XMLSerializer().serializeToString(svg);
+            const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(svgBlob);
+
+            const img = new Image();
+            img.onload = () => {
+                const pngCanvas = document.createElement('canvas');
+                pngCanvas.width = svg.width.baseVal.value;
+                pngCanvas.height = svg.height.baseVal.value;
+                const ctx = pngCanvas.getContext('2d');
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, pngCanvas.width, pngCanvas.height);
+                ctx.drawImage(img, 0, 0);
+
+                pngCanvas.toBlob(blob => {
+                    const pngUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = pngUrl;
+                    a.download = 'distance_matrix_heatmap.png';
+                    a.click();
+                    URL.revokeObjectURL(pngUrl);
+                    URL.revokeObjectURL(url);
+                    statusInfo.textContent = 'Heatmap downloaded as PNG';
+                });
+            };
+            img.src = url;
         });
         
         // Helper functions
@@ -810,7 +931,187 @@
             canvas.style.position = 'relative';
             canvas.appendChild(overlay);
         }
-        
+
+        function displayHeatmap(matrixData) {
+            const canvas = document.getElementById('tree-canvas');
+            canvas.innerHTML = '';
+
+            const strainNames = matrixData.strainNames;
+            const matrix = matrixData.matrix;
+            const n = strainNames.length;
+
+            // Calculate dimensions
+            const margin = { top: 150, right: 50, bottom: 50, left: 150 };
+            const cellSize = Math.min(30, Math.max(10, (600 - margin.left - margin.right) / n));
+            const width = n * cellSize + margin.left + margin.right;
+            const height = n * cellSize + margin.top + margin.bottom;
+
+            // Create SVG
+            const svg = d3.select('#tree-canvas')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', [0, 0, width, height])
+                .style('max-width', '100%')
+                .style('height', 'auto');
+
+            const g = svg.append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+
+            // Find max distance for color scale
+            const maxDistance = d3.max(matrix.flat());
+            const minDistance = d3.min(matrix.flat());
+
+            // Color scale - white (0) to red (max)
+            const colorScale = d3.scaleSequential()
+                .domain([minDistance, maxDistance])
+                .interpolator(d3.interpolateYlOrRd);
+
+            // Add zoom capability
+            svg.call(d3.zoom()
+                .scaleExtent([0.5, 10])
+                .on('zoom', ({transform}) => g.attr('transform',
+                    `translate(${margin.left + transform.x},${margin.top + transform.y}) scale(${transform.k})`)));
+
+            // Create cells
+            const cells = [];
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < n; j++) {
+                    cells.push({
+                        row: i,
+                        col: j,
+                        value: matrix[i][j],
+                        rowName: strainNames[i],
+                        colName: strainNames[j]
+                    });
+                }
+            }
+
+            // Draw cells
+            g.selectAll('rect')
+                .data(cells)
+                .join('rect')
+                .attr('x', d => d.col * cellSize)
+                .attr('y', d => d.row * cellSize)
+                .attr('width', cellSize)
+                .attr('height', cellSize)
+                .attr('fill', d => colorScale(d.value))
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 0.5)
+                .append('title')
+                .text(d => `${d.rowName} → ${d.colName}\nDistance: ${d.value.toFixed(2)}`);
+
+            // Add text labels for distances (only if cells are large enough)
+            if (cellSize >= 20) {
+                g.selectAll('text.cell-text')
+                    .data(cells)
+                    .join('text')
+                    .attr('class', 'cell-text')
+                    .attr('x', d => d.col * cellSize + cellSize / 2)
+                    .attr('y', d => d.row * cellSize + cellSize / 2)
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'middle')
+                    .attr('font-size', Math.min(10, cellSize * 0.4) + 'px')
+                    .attr('fill', d => d.value > maxDistance * 0.6 ? 'white' : 'black')
+                    .attr('pointer-events', 'none')
+                    .text(d => d.value > 0 ? d.value.toFixed(1) : '');
+            }
+
+            // Add row labels
+            g.selectAll('text.row-label')
+                .data(strainNames)
+                .join('text')
+                .attr('class', 'row-label')
+                .attr('x', -5)
+                .attr('y', (d, i) => i * cellSize + cellSize / 2)
+                .attr('text-anchor', 'end')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', Math.min(12, cellSize * 0.8) + 'px')
+                .text(d => d);
+
+            // Add column labels
+            g.selectAll('text.col-label')
+                .data(strainNames)
+                .join('text')
+                .attr('class', 'col-label')
+                .attr('x', (d, i) => i * cellSize + cellSize / 2)
+                .attr('y', -5)
+                .attr('text-anchor', 'start')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', Math.min(12, cellSize * 0.8) + 'px')
+                .attr('transform', (d, i) => `rotate(-45, ${i * cellSize + cellSize / 2}, -5)`)
+                .text(d => d);
+
+            // Add color scale legend
+            const legendWidth = 200;
+            const legendHeight = 20;
+            const legend = svg.append('g')
+                .attr('transform', `translate(${width - legendWidth - margin.right}, ${margin.top - 80})`);
+
+            // Create gradient for legend
+            const defs = svg.append('defs');
+            const gradient = defs.append('linearGradient')
+                .attr('id', 'legend-gradient')
+                .attr('x1', '0%')
+                .attr('x2', '100%');
+
+            const numStops = 10;
+            for (let i = 0; i <= numStops; i++) {
+                const offset = (i / numStops * 100) + '%';
+                const value = minDistance + (maxDistance - minDistance) * i / numStops;
+                gradient.append('stop')
+                    .attr('offset', offset)
+                    .attr('stop-color', colorScale(value));
+            }
+
+            legend.append('rect')
+                .attr('width', legendWidth)
+                .attr('height', legendHeight)
+                .style('fill', 'url(#legend-gradient)')
+                .attr('stroke', '#333')
+                .attr('stroke-width', 1);
+
+            legend.append('text')
+                .attr('x', 0)
+                .attr('y', legendHeight + 15)
+                .attr('font-size', '12px')
+                .text(minDistance.toFixed(1));
+
+            legend.append('text')
+                .attr('x', legendWidth)
+                .attr('y', legendHeight + 15)
+                .attr('text-anchor', 'end')
+                .attr('font-size', '12px')
+                .text(maxDistance.toFixed(1));
+
+            legend.append('text')
+                .attr('x', legendWidth / 2)
+                .attr('y', -5)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '14px')
+                .attr('font-weight', 'bold')
+                .text('Allelic Distance');
+
+            // Add title
+            svg.append('text')
+                .attr('x', width / 2)
+                .attr('y', 30)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '18px')
+                .attr('font-weight', 'bold')
+                .attr('fill', '#667eea')
+                .text('Distance Matrix Heatmap');
+
+            // Add info text
+            svg.append('text')
+                .attr('x', width / 2)
+                .attr('y', 55)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '12px')
+                .attr('fill', '#666')
+                .text(`${n} strains × ${n} strains | Min: ${minDistance.toFixed(2)}, Max: ${maxDistance.toFixed(2)}`);
+        }
+
         function downloadFile(content, filename, type) {
             const blob = new Blob([content], { type });
             const url = URL.createObjectURL(blob);
