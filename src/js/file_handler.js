@@ -39,13 +39,15 @@ class FileHandler {
         // Detect delimiter (tab or comma)
         const delimiter = this._detectDelimiter(lines[0]);
         
-        // Parse header
+        // Parse header - handle both '#Strain' and 'Strain' (without # prefix)
         const header = lines[0].split(delimiter);
-        if (!header[0].startsWith('#')) {
-            throw new Error('Profile file must start with # in the first column');
+        let strainColumnName;
+        if (header[0].startsWith('#')) {
+            strainColumnName = header[0].substring(1).trim();
+        } else {
+            strainColumnName = header[0].trim();
+            console.warn('Profile file header missing # prefix in first column - treating as strain identifier column');
         }
-        
-        const strainColumnName = header[0].substring(1).trim();
         const geneNames = header.slice(1).map(s => s.trim());
         
         // Parse data lines

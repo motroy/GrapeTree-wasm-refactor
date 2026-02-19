@@ -601,6 +601,17 @@
             downloadFile(JSON.stringify(json, null, 2), 'grapetree.json', 'application/json');
         });
 
+        // Download SVG
+        document.getElementById('download-svg-btn').addEventListener('click', () => {
+            const svg = document.querySelector('#tree-canvas svg');
+            if (!svg) {
+                showError('No tree to download - compute a tree first');
+                return;
+            }
+            const svgString = new XMLSerializer().serializeToString(svg);
+            downloadFile(svgString, 'grapetree.svg', 'image/svg+xml');
+        });
+
         // Compute Distance Matrix
         computeMatrixBtn.addEventListener('click', async () => {
             if (!currentData) {
@@ -733,127 +744,219 @@
         function displayTree(tree) {
             const canvas = document.getElementById('tree-canvas');
             canvas.innerHTML = '';
+            canvas.style.position = 'relative';
 
-            const width = canvas.clientWidth;
-            const height = canvas.clientHeight;
+            const width = canvas.clientWidth || 900;
+            const height = 600;
 
-            // Prepare graph data
-            const nodes = currentData.strains.map((name, i) => ({ id: i, name: name }));
-            const links = tree.edges.map(e => ({ source: e.from, target: e.to, distance: e.distance }));
-
-            // Get selected options
             const selectedColumn = colorSelect.value;
             const edgeScale = edgeScaleSelect.value;
 
-            // Build color scale with all unique values
-            let colorScale = d3.scaleOrdinal(d3.schemeCategory10);
-            let uniqueValues = new Set();
+            // Build color mapping from metadata
             let colorMapping = {};
-
+            let uniqueValues = new Set();
             if (selectedColumn && currentMetadata) {
-                // Collect all unique values for the selected column
                 Object.keys(currentMetadata).forEach(strain => {
-                    if (currentMetadata[strain] && currentMetadata[strain][selectedColumn]) {
-                        const value = currentMetadata[strain][selectedColumn];
-                        uniqueValues.add(value);
-                    }
+                    const val = currentMetadata[strain] && currentMetadata[strain][selectedColumn];
+                    if (val) uniqueValues.add(val);
                 });
-
-                // Create stable color mapping
-                const sortedValues = Array.from(uniqueValues).sort();
-                sortedValues.forEach((value, idx) => {
-                    colorMapping[value] = colorScale(idx);
+                const palette = d3.scaleOrdinal(d3.schemeCategory10);
+                Array.from(uniqueValues).sort().forEach((v, i) => {
+                    colorMapping[v] = palette(i);
                 });
             }
 
-            // Create SVG
+            // Nodes - original GrapeTree: radius = Math.pow(count, size_power) * base_node_size
+            // base_node_size=10, size_power=0.5; each node here represents one strain (count=1)
+            const BASE_NODE_SIZE = 10;
+            const SIZE_POWER = 0.5;
+            const nodeRadius = Math.max(4, Math.pow(1, SIZE_POWER) * BASE_NODE_SIZE);
+
+            const nodes = currentData.strains.map((name, i) => ({ id: i, name: name }));
+
+            // Links with pre-computed pixel distances (like original GrapeTree's link_distance)
+            const links = tree.edges.map(e => ({
+                source: e.from,
+                target: e.to,
+                distance: e.distance
+            }));
+
+            // Scale link distances to pixels (original GrapeTree: max_link_scale ~300-500px)
+            const maxDist = d3.max(links, d => d.distance) || 1;
+            const MAX_LINK_SCALE = Math.max(200, Math.min(500, Math.sqrt(nodes.length) * 20));
+
+            links.forEach(l => {
+                if (l.distance === 0) {
+                    // Identical strains: position nodes touching
+                    l.link_distance = nodeRadius * 2;
+                } else {
+                    const scaledDist = edgeScale === 'log'
+                        ? (Math.log(l.distance + 1) / Math.log(maxDist + 1)) * MAX_LINK_SCALE
+                        : (l.distance / maxDist) * MAX_LINK_SCALE;
+                    // Add node radii to link distance (like original GrapeTree)
+                    l.link_distance = Math.max(nodeRadius * 3, scaledDist) + nodeRadius * 2;
+                }
+            });
+
+            // --- Greedy BFS initial layout (matches original GrapeTree's greedy_layout) ---
+            // Build adjacency list using numeric IDs (before D3 converts them to objects)
+            const adj = {};
+            nodes.forEach(n => { adj[n.id] = []; });
+            links.forEach(l => {
+                adj[l.source].push({ neighbor: l.target, dist: l.link_distance });
+                adj[l.target].push({ neighbor: l.source, dist: l.link_distance });
+            });
+
+            // Start from the highest-degree node (like original GrapeTree)
+            let root = 0;
+            let maxDeg = 0;
+            nodes.forEach(n => {
+                if (adj[n.id].length > maxDeg) { maxDeg = adj[n.id].length; root = n.id; }
+            });
+
+            const nodeById = {};
+            nodes.forEach(n => { nodeById[n.id] = n; });
+
+            // Place all nodes at centre initially (like original GrapeTree)
+            nodes.forEach(n => { n.x = width / 2; n.y = height / 2; });
+
+            const cx = width / 2, cy = height / 2;
+            const visited = new Set();
+
+            function bfsLayout(startId, startX, startY, startAngle, span) {
+                visited.add(startId);
+                nodeById[startId].x = startX;
+                nodeById[startId].y = startY;
+                const queue = [{ id: startId, x: startX, y: startY, angle: startAngle, span: span }];
+                while (queue.length > 0) {
+                    const { id, x, y, angle, span: arcSpan } = queue.shift();
+                    const children = adj[id].filter(e => !visited.has(e.neighbor));
+                    if (children.length === 0) continue;
+                    const anglePerChild = arcSpan / children.length;
+                    children.forEach((child, i) => {
+                        visited.add(child.neighbor);
+                        const childAngle = angle - arcSpan / 2 + anglePerChild * (i + 0.5);
+                        nodeById[child.neighbor].x = x + Math.cos(childAngle) * child.dist;
+                        nodeById[child.neighbor].y = y + Math.sin(childAngle) * child.dist;
+                        queue.push({
+                            id: child.neighbor,
+                            x: nodeById[child.neighbor].x,
+                            y: nodeById[child.neighbor].y,
+                            angle: childAngle,
+                            span: Math.max(Math.PI / 8, anglePerChild)
+                        });
+                    });
+                }
+            }
+
+            // Layout main component from root
+            bfsLayout(root, cx, cy, -Math.PI / 2, 2 * Math.PI);
+
+            // Layout any disconnected components
+            let compOffsetX = nodeRadius * 4;
+            nodes.forEach(n => {
+                if (!visited.has(n.id)) {
+                    bfsLayout(n.id, compOffsetX, nodeRadius * 4, 0, Math.PI);
+                    compOffsetX += 120;
+                }
+            });
+
+            // --- SVG ---
             const svg = d3.select('#tree-canvas')
                 .append('svg')
                 .attr('width', width)
                 .attr('height', height)
                 .attr('viewBox', [0, 0, width, height])
                 .style('max-width', '100%')
-                .style('height', 'auto');
+                .style('height', 'auto')
+                .style('background', '#fff');
 
-            // Add zoom
             const g = svg.append('g');
             svg.call(d3.zoom()
                 .extent([[0, 0], [width, height]])
-                .scaleExtent([0.1, 8])
-                .on('zoom', ({transform}) => g.attr('transform', transform)));
+                .scaleExtent([0.05, 20])
+                .on('zoom', ({ transform }) => g.attr('transform', transform)));
 
-            // Calculate edge distances based on scale
-            const distanceFunction = edgeScale === 'log'
-                ? (d) => Math.max(20, Math.log(d.distance + 1) * 30)
-                : (d) => Math.max(20, d.distance * 10);
-
-            // Simulation
+            // --- Force simulation (original GrapeTree style) ---
+            // Key parameters from original GrapeTree:
+            //   gravity = 0.0  → no forceCenter
+            //   linkStrength = 10 (D3v3) → strength(1) + iterations(10) in D3v7
+            //   charge = -400  → forceManyBody strength=-30 (weaker since we have good initial layout)
             const simulation = d3.forceSimulation(nodes)
-                .force('link', d3.forceLink(links).id(d => d.id).distance(distanceFunction))
-                .force('charge', d3.forceManyBody().strength(-300))
-                .force('center', d3.forceCenter(width / 2, height / 2));
+                .force('link', d3.forceLink(links)
+                    .id(d => d.id)
+                    .distance(d => d.link_distance)
+                    .strength(1)
+                    .iterations(10))
+                .force('charge', d3.forceManyBody().strength(-30))
+                .force('collision', d3.forceCollide(nodeRadius + 1))
+                // No forceCenter: gravity=0 like original GrapeTree
+                .alphaDecay(0.02)
+                .velocityDecay(0.4);
 
-            // Draw links
-            const linkGroup = g.append('g').selectAll('g').data(links).join('g');
-
-            const link = linkGroup.append('line')
+            // --- Edges ---
+            const link = g.append('g')
+                .selectAll('line')
+                .data(links)
+                .join('line')
                 .attr('stroke', '#999')
-                .attr('stroke-opacity', 0.6)
-                .attr('stroke-width', 2);
+                .attr('stroke-opacity', 0.8)
+                .attr('stroke-width', 1.5);
 
-            // Edge distances labels
-            const linkLabel = linkGroup.append('text')
-                .attr('font-size', '10px')
+            // Edge distance labels (integers, like original GrapeTree)
+            const linkLabel = g.append('g')
+                .selectAll('text')
+                .data(links.filter(d => d.distance > 0))
+                .join('text')
+                .attr('font-size', '9px')
                 .attr('fill', '#666')
                 .attr('text-anchor', 'middle')
-                .text(d => d.distance > 0 ? d.distance.toFixed(1) : "");
+                .attr('pointer-events', 'none')
+                .text(d => d.distance);
 
-            // Draw nodes with proper coloring
+            // --- Nodes (circles sized by count, like original GrapeTree) ---
             const node = g.append('g')
-                .attr('stroke', '#fff')
-                .attr('stroke-width', 1.5)
                 .selectAll('circle')
                 .data(nodes)
                 .join('circle')
-                .attr('r', 8)
+                .attr('r', nodeRadius)
                 .attr('fill', d => {
                     if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
-                        const value = currentMetadata[d.name][selectedColumn];
-                        if (value && colorMapping[value]) {
-                            return colorMapping[value];
-                        }
+                        const v = currentMetadata[d.name][selectedColumn];
+                        if (v && colorMapping[v]) return colorMapping[v];
                     }
-                    return '#667eea';
+                    return '#ccc';
                 })
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 1.5)
+                .style('cursor', 'pointer')
                 .call(d3.drag()
                     .on('start', dragstarted)
                     .on('drag', dragged)
                     .on('end', dragended));
 
-            // Add labels
+            node.append('title').text(d => {
+                let text = d.name;
+                if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
+                    const v = currentMetadata[d.name][selectedColumn];
+                    if (v) text += `\n${selectedColumn}: ${v}`;
+                }
+                return text;
+            });
+
+            // Node labels
             const label = g.append('g')
                 .selectAll('text')
                 .data(nodes)
                 .join('text')
-                .attr('dx', 12)
-                .attr('dy', '.35em')
-                .text(d => d.name)
-                .style('font-size', '12px')
+                .attr('font-size', '10px')
+                .attr('dx', nodeRadius + 3)
+                .attr('dy', '0.35em')
                 .style('fill', '#333')
-                .style('pointer-events', 'none');
+                .style('pointer-events', 'none')
+                .text(d => d.name);
 
-            node.append('title')
-                .text(d => {
-                    let text = d.name;
-                    if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
-                        const value = currentMetadata[d.name][selectedColumn];
-                        if (value) {
-                            text += `\n${selectedColumn}: ${value}`;
-                        }
-                    }
-                    return text;
-                });
-
+            // --- Tick ---
             simulation.on('tick', () => {
                 link
                     .attr('x1', d => d.source.x)
@@ -891,44 +994,27 @@
                 event.subject.fy = null;
             }
 
-            // Add legend if metadata coloring is active
+            // --- Legend ---
             if (selectedColumn && uniqueValues.size > 0) {
                 const legend = document.createElement('div');
                 legend.className = 'legend';
-
                 let legendHTML = `<div class="legend-title">${selectedColumn}</div>`;
-
-                const sortedValues = Array.from(uniqueValues).sort();
-                sortedValues.forEach(value => {
-                    const color = colorMapping[value];
+                Array.from(uniqueValues).sort().forEach(value => {
                     legendHTML += `
                         <div class="legend-item">
-                            <div class="legend-color" style="background-color: ${color}"></div>
+                            <div class="legend-color" style="background-color: ${colorMapping[value]}; border-radius: 50%;"></div>
                             <div class="legend-label">${value}</div>
                         </div>
                     `;
                 });
-
                 legend.innerHTML = legendHTML;
                 canvas.appendChild(legend);
             }
 
-            // Add success message overlay
+            // Stats overlay
             const overlay = document.createElement('div');
-            overlay.style.position = 'absolute';
-            overlay.style.top = '10px';
-            overlay.style.left = '10px';
-            overlay.style.background = 'rgba(255, 255, 255, 0.9)';
-            overlay.style.padding = '10px';
-            overlay.style.borderRadius = '4px';
-            overlay.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-            overlay.innerHTML = `
-                <h4 style="color: #667eea; margin: 0;">✓ Tree Computed</h4>
-                <div style="font-size: 0.8rem; color: #666; margin-top: 4px;">
-                    ${tree.nNodes} nodes, ${tree.nEdges} edges
-                </div>
-            `;
-            canvas.style.position = 'relative';
+            overlay.style.cssText = 'position:absolute;top:10px;left:10px;background:rgba(255,255,255,0.9);padding:8px 12px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,0.1);font-size:0.85rem;color:#555;';
+            overlay.innerHTML = `<strong>${tree.nNodes}</strong> nodes &bull; <strong>${tree.nEdges}</strong> edges`;
             canvas.appendChild(overlay);
         }
 
