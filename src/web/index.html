@@ -450,12 +450,33 @@
                         `Loaded pre-computed tree: ${currentTree.nNodes} nodes, ` +
                         `${currentTree.nEdges} edges`;
                     computeBtn.disabled = true;
+                    computeMatrixBtn.disabled = true;
                     document.getElementById('stat-nodes').textContent = currentTree.nNodes;
                     document.getElementById('stat-edges').textContent = currentTree.nEdges;
                     document.getElementById('stat-time').textContent = '-';
                     document.getElementById('stat-method').textContent = 'pre-computed';
                     treeInfo.style.display = 'block';
                     downloadJsonBtn.disabled = false;
+
+                    // Populate "Color by" from embedded metadata if present
+                    if (currentData.embeddedMetadata) {
+                        currentMetadata = currentData.embeddedMetadata;
+                        const fields = new Set();
+                        Object.values(currentMetadata).forEach(obj => {
+                            if (obj && typeof obj === 'object') {
+                                Object.keys(obj).forEach(k => fields.add(k));
+                            }
+                        });
+                        colorSelect.innerHTML = '<option value="">None (Default)</option>';
+                        fields.forEach(field => {
+                            const option = document.createElement('option');
+                            option.value = field;
+                            option.textContent = field;
+                            colorSelect.appendChild(option);
+                        });
+                        colorSelect.disabled = fields.size === 0;
+                    }
+
                     displayTree(currentTree);
                 } else {
                     statusInfo.textContent =
@@ -636,6 +657,11 @@
                 return;
             }
 
+            if (currentData.type === 'precomputed') {
+                showError('Distance matrix cannot be computed from a pre-computed tree — allele profiles are required. Load a profile or FASTA file instead.');
+                return;
+            }
+
             try {
                 hideError();
                 showProgress();
@@ -666,7 +692,7 @@
 
             } catch (error) {
                 hideProgress();
-                showError('Matrix computation failed: ' + error.message);
+                showError('Matrix computation failed: ' + (error.message || String(error)));
             }
         });
 
