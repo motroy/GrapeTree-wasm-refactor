@@ -192,6 +192,10 @@ class FileHandler {
     /**
      * Extract pre-computed tree from links format:
      * {links: [{source: 0, target: 1, distance: 3.07}, ...]}
+     *
+     * Optionally supports:
+     *   nodes: ["name0", "name1", ...]  — explicit node labels
+     *   metadata: {"name0": {col: val}, ...}  — embedded metadata for color-by
      */
     _extractFromLinksFormat(data) {
         if (data.links.length === 0) {
@@ -210,14 +214,19 @@ class FileHandler {
         const indexMap = new Map();
         nodeIndices.forEach((idx, i) => { indexMap.set(idx, i); });
 
-        const strains = nodeIndices.map(i => String(i));
+        // Use explicit node labels if provided, otherwise fall back to string indices
+        const hasLabels = Array.isArray(data.nodes) && data.nodes.length > 0;
+        const strains = nodeIndices.map(idx =>
+            hasLabels && data.nodes[idx] !== undefined ? String(data.nodes[idx]) : String(idx)
+        );
+
         const edges = data.links.map(link => ({
             from: indexMap.get(link.source),
             to: indexMap.get(link.target),
             distance: link.distance
         }));
 
-        return {
+        const result = {
             strains,
             type: 'precomputed',
             precomputedTree: {
@@ -227,6 +236,14 @@ class FileHandler {
                 newick: null
             }
         };
+
+        // Pass through embedded metadata (keyed by node label) so the UI
+        // can populate the "Color by" dropdown without a separate metadata file.
+        if (data.metadata && typeof data.metadata === 'object') {
+            result.embeddedMetadata = data.metadata;
+        }
+
+        return result;
     }
     
     /**

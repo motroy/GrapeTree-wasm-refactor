@@ -118,7 +118,7 @@ class GrapeTreeWASM {
 
         } catch (error) {
             console.error('Distance matrix computation error:', error);
-            throw error;
+            throw error instanceof Error ? error : new Error(String(error));
         }
     }
 
