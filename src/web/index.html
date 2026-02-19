@@ -603,38 +603,29 @@
         downloadJsonBtn.addEventListener('click', () => {
             if (!currentTree || !currentData) return;
 
-            const json = {
-                metadata: {},
-                tree: currentTree.newick,
-                initialTree: currentTree.newick
-            };
+            // GrapeTree session format (compatible with MSTree_holder.html):
+            //   nodes   – ordered array of strain name strings
+            //   links   – [{source: int, target: int, distance: float}]
+            //   nwk     – Newick string (optional but useful)
+            //   metadata – {strainName: {col: val, ...}, ...}
+            const nodes = currentData.strains;
+            const links = currentTree.edges.map(e => ({
+                source: e.from,
+                target: e.to,
+                distance: e.distance
+            }));
 
-            // Populate metadata
-            // Format: ID: [val1, val2, ...]
-            // But GrapeTree JSON usually has metadata as:
-            // "metadata": { "ID": { "col": "val", ... } } ??
-            // No, GrapeTree standard JSON usually stores metadata in a specific way.
-            // But usually for GrapeTree standalone, the "metadata" key in JSON file contains lines from the profile + metadata.
-
-            // For simplicity, we can create a JSON structure compatible with what GrapeTree expects if possible,
-            // or just a JSON dump of what we have.
-            // The user requested "GrapeTree .json file".
-            // The format usually includes a "metadata" object where keys are strain names and values are objects/arrays.
-
-            // Let's assume a simple format:
-            // metadata: { "strain1": { "col1": "val1" }, ... }
-
-            // We should merge profile data and external metadata.
-
-            currentData.strains.forEach((strain, i) => {
-                json.metadata[strain] = {};
-                // Add profile data? Usually not necessary if tree is there, but useful.
-                // But GrapeTree often uses metadata for coloring.
-
-                if (currentMetadata && currentMetadata[strain]) {
-                    Object.assign(json.metadata[strain], currentMetadata[strain]);
-                }
+            const metadata = {};
+            currentData.strains.forEach(strain => {
+                metadata[strain] = currentMetadata && currentMetadata[strain]
+                    ? Object.assign({}, currentMetadata[strain])
+                    : {};
             });
+
+            const json = { nodes, links, metadata };
+            if (currentTree.newick) {
+                json.nwk = currentTree.newick;
+            }
 
             downloadFile(JSON.stringify(json, null, 2), 'grapetree.json', 'application/json');
         });
