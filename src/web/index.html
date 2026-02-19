@@ -603,29 +603,16 @@
         downloadJsonBtn.addEventListener('click', () => {
             if (!currentTree || !currentData) return;
 
-            // GrapeTree session format (compatible with MSTree_holder.html):
-            //   nodes   – ordered array of strain name strings
-            //   links   – [{source: int, target: int, distance: float}]
-            //   nwk     – Newick string (optional but useful)
-            //   metadata – {strainName: {col: val, ...}, ...}
-            const nodes = currentData.strains;
-            const links = currentTree.edges.map(e => ({
-                source: e.from,
-                target: e.to,
-                distance: e.distance
-            }));
-
-            const metadata = {};
-            currentData.strains.forEach(strain => {
-                metadata[strain] = currentMetadata && currentMetadata[strain]
-                    ? Object.assign({}, currentMetadata[strain])
-                    : {};
-            });
-
-            const json = { nodes, links, metadata };
-            if (currentTree.newick) {
-                json.nwk = currentTree.newick;
-            }
+            // Match GrapeTree's own example format exactly:
+            // { "links": [ {"source": int, "target": int, "distance": float}, ... ] }
+            // (see examples/ST313.lineage.json)
+            const json = {
+                links: currentTree.edges.map(e => ({
+                    source: e.from,
+                    target: e.to,
+                    distance: e.distance
+                }))
+            };
 
             downloadFile(JSON.stringify(json, null, 2), 'grapetree.json', 'application/json');
         });
