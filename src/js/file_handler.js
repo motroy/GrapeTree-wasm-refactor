@@ -161,27 +161,72 @@ class FileHandler {
     }
     
     /**
-     * Parse JSON format (GrapeTree session)
+     * Parse JSON format (GrapeTree session or pre-computed lineage)
      */
     parseJson(content) {
         try {
             const data = JSON.parse(content);
-            
+
             if (data.strains && data.profiles) {
                 return data;
             }
-            
+
+            // Pre-computed tree format: {links: [{source, target, distance}, ...]}
+            if (data.links && Array.isArray(data.links)) {
+                return this._extractFromLinksFormat(data);
+            }
+
             // Try to extract from GrapeTree session format
             if (data.tree && data.metadata) {
                 // Convert from session format
                 return this._extractFromSession(data);
             }
-            
+
             throw new Error('JSON file must contain strains and profiles fields');
-            
+
         } catch (error) {
             throw new Error(`Failed to parse JSON: ${error.message}`);
         }
+    }
+
+    /**
+     * Extract pre-computed tree from links format:
+     * {links: [{source: 0, target: 1, distance: 3.07}, ...]}
+     */
+    _extractFromLinksFormat(data) {
+        if (data.links.length === 0) {
+            throw new Error('Links array is empty');
+        }
+
+        // Collect all unique node indices
+        const nodeSet = new Set();
+        for (const link of data.links) {
+            nodeSet.add(link.source);
+            nodeSet.add(link.target);
+        }
+        const nodeIndices = Array.from(nodeSet).sort((a, b) => a - b);
+
+        // Map original indices to sequential 0-based indices
+        const indexMap = new Map();
+        nodeIndices.forEach((idx, i) => { indexMap.set(idx, i); });
+
+        const strains = nodeIndices.map(i => String(i));
+        const edges = data.links.map(link => ({
+            from: indexMap.get(link.source),
+            to: indexMap.get(link.target),
+            distance: link.distance
+        }));
+
+        return {
+            strains,
+            type: 'precomputed',
+            precomputedTree: {
+                edges,
+                nNodes: strains.length,
+                nEdges: edges.length,
+                newick: null
+            }
+        };
     }
     
     /**
