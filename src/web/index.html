@@ -409,6 +409,31 @@
         .legend-clear-btn:hover {
             background: rgba(102, 126, 234, 0.08);
         }
+
+        .cluster-hull {
+            opacity: 0.18;
+            stroke-width: 2;
+            stroke-opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .hiercc-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .hiercc-shade-label {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.88rem;
+            color: #555;
+            cursor: pointer;
+            user-select: none;
+        }
     </style>
 </head>
 <body>
@@ -465,6 +490,15 @@
                     </select>
                 </div>
                 <div class="hc-stats" id="hc-stats"></div>
+                <div class="hiercc-actions">
+                    <button class="btn-secondary" id="download-hiercc-btn" style="display:none; padding: 0.35rem 0.8rem; font-size: 0.85rem;">
+                        Download HierCC TSV
+                    </button>
+                    <label class="hiercc-shade-label">
+                        <input type="checkbox" id="shade-clusters-check">
+                        Shade cluster regions
+                    </label>
+                </div>
             </div>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
@@ -634,6 +668,8 @@
         const hierccPanel = document.getElementById('hiercc-panel');
         const hcLevelSelect = document.getElementById('hc-level-select');
         const hcStats = document.getElementById('hc-stats');
+        const downloadHierccBtn = document.getElementById('download-hiercc-btn');
+        const shadeClustersCheck = document.getElementById('shade-clusters-check');
         const errorMessage = document.getElementById('error-message');
         const progressBar = document.getElementById('progress-bar');
         const treeInfo = document.getElementById('tree-info');
@@ -829,6 +865,7 @@
             });
 
             hierccPanel.style.display = 'block';
+            downloadHierccBtn.style.display = 'inline-block';
 
             const badge = document.getElementById('hiercc-source-badge');
             if (badge) {
@@ -1048,6 +1085,28 @@
             }
 
             downloadFile(JSON.stringify(json, null, 2), 'grapetree.json', 'application/json');
+        });
+
+        // Download HierCC Clusters as TSV
+        downloadHierccBtn.addEventListener('click', () => {
+            if (!currentHierCC) return;
+
+            const levels = currentHierCC.hcLevels;
+            let tsv = 'ST_id\t' + levels.join('\t') + '\n';
+
+            Object.keys(currentHierCC.clusterData).sort().forEach(strain => {
+                const assignments = currentHierCC.clusterData[strain];
+                const row = [strain, ...levels.map(l => (assignments[l] !== undefined && assignments[l] !== '') ? assignments[l] : '')];
+                tsv += row.join('\t') + '\n';
+            });
+
+            downloadFile(tsv, 'hiercc_clusters.tsv', 'text/tab-separated-values');
+            statusInfo.textContent = 'HierCC clustering results downloaded as TSV';
+        });
+
+        // Shade clusters checkbox — re-render tree when toggled
+        shadeClustersCheck.addEventListener('change', () => {
+            if (currentTree) displayTree(currentTree);
         });
 
         // Download SVG
@@ -1349,6 +1408,73 @@
                 .scaleExtent([0.05, 20])
                 .on('zoom', ({ transform }) => g.attr('transform', transform)));
 
+            // --- Cluster hull shading (rendered behind everything else) ---
+            const showShading = shadeClustersCheck && shadeClustersCheck.checked && selectedColumn && currentMetadata;
+            const hullGroup = g.append('g').attr('class', 'hull-group');
+
+            function expandHullPoints(points, padding) {
+                if (!points || points.length < 2) return points;
+                const cx = d3.mean(points, p => p[0]);
+                const cy = d3.mean(points, p => p[1]);
+                return points.map(([x, y]) => {
+                    const dx = x - cx;
+                    const dy = y - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    return [x + (dx / dist) * padding, y + (dy / dist) * padding];
+                });
+            }
+
+            function updateHulls() {
+                if (!showShading) { hullGroup.selectAll('*').remove(); return; }
+
+                // Gather node positions by cluster value
+                const clusters = {};
+                nodes.forEach(d => {
+                    const v = nodeClusterValue(d);
+                    if (v && v !== 'Unknown') {
+                        if (!clusters[v]) clusters[v] = [];
+                        clusters[v].push([d.x, d.y]);
+                    }
+                });
+
+                const HULL_PADDING = nodeRadius + 14;
+
+                const hullData = Object.entries(clusters).map(([value, pts]) => {
+                    let hull;
+                    if (pts.length >= 3) {
+                        const raw = d3.polygonHull(pts);
+                        hull = raw ? expandHullPoints(raw, HULL_PADDING) : null;
+                    } else if (pts.length === 2) {
+                        // Approximate capsule with a small expanded polygon
+                        const dx = pts[1][0] - pts[0][0];
+                        const dy = pts[1][1] - pts[0][1];
+                        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                        const nx = -dy / len * HULL_PADDING;
+                        const ny = dx / len * HULL_PADDING;
+                        hull = [
+                            [pts[0][0] + nx, pts[0][1] + ny],
+                            [pts[1][0] + nx, pts[1][1] + ny],
+                            [pts[1][0] - nx, pts[1][1] - ny],
+                            [pts[0][0] - nx, pts[0][1] - ny]
+                        ];
+                    } else {
+                        // Single point — small square placeholder (circle drawn via rx)
+                        const [x, y] = pts[0];
+                        const r = HULL_PADDING;
+                        hull = [[x - r, y - r], [x + r, y - r], [x + r, y + r], [x - r, y + r]];
+                    }
+                    return { value, hull };
+                }).filter(d => d.hull);
+
+                hullGroup.selectAll('path')
+                    .data(hullData, d => d.value)
+                    .join('path')
+                    .attr('class', 'cluster-hull')
+                    .attr('fill', d => colorMapping[d.value] || '#ccc')
+                    .attr('stroke', d => colorMapping[d.value] || '#ccc')
+                    .attr('d', d => 'M' + d.hull.join('L') + 'Z');
+            }
+
             // --- Force simulation (original GrapeTree style) ---
             // Key parameters from original GrapeTree:
             //   gravity = 0.0  → no forceCenter
@@ -1494,6 +1620,8 @@
                 label
                     .attr('x', d => d.x)
                     .attr('y', d => d.y);
+
+                updateHulls();
             });
 
             function dragstarted(event) {
@@ -1661,6 +1789,11 @@
                                 .filter(d => d && currentMetadata && currentMetadata[d.name] &&
                                              currentMetadata[d.name][selectedColumn] === value)
                                 .attr('fill', newColor);
+                            // Also update hull shading color
+                            d3.select('#tree-canvas .hull-group').selectAll('path')
+                                .filter(d => d && d.value === value)
+                                .attr('fill', newColor)
+                                .attr('stroke', newColor);
                         } else {
                             customRingColors[value] = newColor;
                             swatch.style.borderColor = newColor;
