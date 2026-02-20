@@ -447,14 +447,18 @@
                 <label for="hiercc-input">Upload pHierCC Clusters (Optional)</label>
                 <input type="file" id="hiercc-input" accept=".txt,.tsv,.gz">
                 <small style="color: #999; margin-top: 0.5rem; display: block;">
-                    pHierCC hierarchical clustering output (.HierCC.gz or plain tab-delimited)
-                    — <a href="https://github.com/zheminzhou/pHierCC" target="_blank" rel="noopener noreferrer" style="color:#667eea;">pHierCC docs</a>
+                    HC clusters are <strong>computed automatically</strong> from the MST after tree computation.
+                    Upload a <a href="https://github.com/zheminzhou/pHierCC" target="_blank" rel="noopener noreferrer" style="color:#667eea;">pHierCC</a>
+                    output file (.HierCC.gz or tab-delimited) only if you need external cluster assignments.
                 </small>
             </div>
 
-            <!-- HC level selector — shown only after a pHierCC file is loaded -->
+            <!-- HC level selector — shown after pHierCC file upload OR tree computation -->
             <div class="hiercc-panel" id="hiercc-panel" style="display:none;">
-                <label>pHierCC Cluster Level</label>
+                <label>pHierCC Cluster Level
+                    <span id="hiercc-source-badge"
+                          style="font-weight:400;font-size:0.75rem;color:#888;margin-left:0.5rem;"></span>
+                </label>
                 <div class="hc-slider-row">
                     <select id="hc-level-select" title="Select hierarchical clustering level">
                         <option value="">Select HC level…</option>
@@ -590,7 +594,8 @@
     <script type="module">
         import GrapeTreeWASM from './wasm_loader.js';
         import FileHandler from './file_handler.js';
-        
+        import HierCC from './hiercc.js';
+
         // Initialize application
         let grapetree = null;
         let fileHandler = new FileHandler();
@@ -608,6 +613,7 @@
         let currentHierCC = null;    // { clusterData, hcLevels }
         let currentHCLevel = null;   // currently selected HC level string, e.g. 'HC10'
         let selectedClusters = new Set(); // cluster values selected for highlighting
+        let hierccSource = null;     // 'computed' | 'uploaded' | null
 
         // DOM elements
         const fileInput = document.getElementById('file-input');
@@ -710,6 +716,7 @@
                     }
 
                     displayTree(currentTree);
+                    computeHierCCFromTree();
                 } else {
                     statusInfo.textContent =
                         `Loaded ${currentData.strains.length} strains with ` +
@@ -757,25 +764,13 @@
             try {
                 statusInfo.textContent = `Loading pHierCC file ${file.name}…`;
                 currentHierCC = await fileHandler.parseHierCC(file);
-                currentHCLevel = null;
-                selectedClusters = new Set();
+                hierccSource = 'uploaded';
 
-                // Populate HC level selector
-                hcLevelSelect.innerHTML = '<option value="">Select HC level…</option>';
-                currentHierCC.hcLevels.forEach(level => {
-                    const opt = document.createElement('option');
-                    opt.value = level;
-                    opt.textContent = level;
-                    hcLevelSelect.appendChild(opt);
-                });
-
-                hierccPanel.style.display = 'block';
                 const nStrains = Object.keys(currentHierCC.clusterData).length;
                 statusInfo.textContent =
                     `Loaded pHierCC file: ${nStrains} strains × ${currentHierCC.hcLevels.length} HC levels`;
-                hcStats.textContent =
-                    `${currentHierCC.hcLevels.length} levels available (${currentHierCC.hcLevels[0]} – ` +
-                    `${currentHierCC.hcLevels[currentHierCC.hcLevels.length - 1]})`;
+
+                _populateHierCCPanel(null);
 
             } catch (error) {
                 showError('Failed to load pHierCC file: ' + error.message);
@@ -791,6 +786,77 @@
             selectedClusters = new Set();
             applyHierCCLevel(level);
         });
+
+        /**
+         * Compute pHierCC clusters from the current MST and populate the panel.
+         * Called automatically after every tree computation.
+         * An uploaded pHierCC file always takes precedence over this.
+         */
+        function computeHierCCFromTree() {
+            if (!currentTree || !currentData) return;
+
+            const rawResult = HierCC.compute(
+                currentTree.edges,
+                currentData.strains.length
+            );
+
+            // Convert array-based result to the per-strain dict used by applyHierCCLevel
+            currentHierCC = HierCC.buildClusterData(currentData.strains, rawResult);
+            // Also attach raw cluster counts for stats display
+            currentHierCC._clusterCounts = rawResult.clusterCounts;
+            hierccSource = 'computed';
+
+            _populateHierCCPanel(rawResult.clusterCounts);
+        }
+
+        /**
+         * Populate the HC level dropdown and panel UI.
+         * Called by both computeHierCCFromTree and the file-upload handler.
+         *
+         * @param {Object|null} clusterCounts - level → count (optional, for computed results)
+         */
+        function _populateHierCCPanel(clusterCounts = null) {
+            currentHCLevel = null;
+            selectedClusters = new Set();
+
+            hcLevelSelect.innerHTML = '<option value="">Select HC level…</option>';
+            currentHierCC.hcLevels.forEach(level => {
+                const opt = document.createElement('option');
+                opt.value = level;
+                const count = clusterCounts ? clusterCounts[level] : null;
+                opt.textContent = count !== null ? `${level}  (${count} cluster${count === 1 ? '' : 's'})` : level;
+                hcLevelSelect.appendChild(opt);
+            });
+
+            hierccPanel.style.display = 'block';
+
+            const badge = document.getElementById('hiercc-source-badge');
+            if (badge) {
+                badge.textContent = hierccSource === 'computed'
+                    ? '— computed from MST'
+                    : '— loaded from file';
+            }
+
+            const nStrains = Object.keys(currentHierCC.clusterData).length;
+            if (clusterCounts) {
+                // For computed results, pick a sensible default level
+                // (first level with >1 cluster but <nStrains clusters)
+                const sensible = currentHierCC.hcLevels.find(l => {
+                    const c = clusterCounts[l];
+                    return c > 1 && c < nStrains;
+                });
+                if (sensible) {
+                    hcLevelSelect.value = sensible;
+                    currentHCLevel = sensible;
+                    applyHierCCLevel(sensible);
+                    return; // stats set by applyHierCCLevel
+                }
+            }
+
+            hcStats.textContent =
+                `${currentHierCC.hcLevels.length} levels available ` +
+                `(${currentHierCC.hcLevels[0]} – ${currentHierCC.hcLevels[currentHierCC.hcLevels.length - 1]})`;
+        }
 
         /**
          * Inject the selected HC level's cluster assignments into currentMetadata,
@@ -932,9 +998,13 @@
                 downloadNewickBtn.disabled = false;
                 downloadJsonBtn.disabled = false;
                 
-                // Display tree (placeholder - would integrate D3.js visualization)
+                // Display tree
                 displayTree(currentTree);
-                
+
+                // Auto-compute pHierCC clusters from the MST
+                // (skipped if the user already uploaded a pHierCC file)
+                computeHierCCFromTree();
+
             } catch (error) {
                 hideProgress();
                 showError('Tree computation failed: ' + error.message);
