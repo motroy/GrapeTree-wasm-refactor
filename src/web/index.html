@@ -434,6 +434,57 @@
             cursor: pointer;
             user-select: none;
         }
+
+        /* pHierCCval analysis section */
+        .phierccval-section {
+            background: white;
+            padding: 1.5rem 2rem 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-top: 2rem;
+        }
+
+        .phierccval-section h3 {
+            color: #667eea;
+            margin-bottom: 1rem;
+            font-size: 1.15rem;
+        }
+
+        .phierccval-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 1rem;
+        }
+
+        .phierccval-plots {
+            display: flex;
+            flex-direction: column;
+            gap: 2.5rem;
+        }
+
+        .phierccval-plot-block {
+            overflow-x: auto;
+        }
+
+        .phierccval-plot-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 0.5rem;
+        }
+
+        .silhouette-note {
+            font-size: 0.82rem;
+            color: #888;
+            font-style: italic;
+            padding: 1rem 0;
+        }
     </style>
 </head>
 <body>
@@ -630,8 +681,23 @@
                 </div>
             </div>
         </div>
+
+        <!-- pHierCCval analysis: NMI heatmap + silhouette plot -->
+        <div class="phierccval-section" id="phierccval-section" style="display:none;">
+            <h3>pHierCCval Analysis</h3>
+            <div class="phierccval-toolbar">
+                <button class="btn-secondary" id="compute-silhouette-btn">
+                    Compute Silhouette Scores
+                </button>
+                <span class="silhouette-note" id="silhouette-status"></span>
+                <button class="btn-secondary" id="download-phierccval-svg-btn" style="margin-left:auto;">
+                    Download SVG
+                </button>
+            </div>
+            <div class="phierccval-plots" id="phierccval-plots"></div>
+        </div>
     </div>
-    
+
     <script src="grapetree.js"></script>
     <script type="module">
         import GrapeTreeWASM from './wasm_loader.js';
@@ -656,6 +722,11 @@
         let currentHCLevel = null;   // currently selected HC level string, e.g. 'HC10'
         let selectedClusters = new Set(); // cluster values selected for highlighting
         let hierccSource = null;     // 'computed' | 'uploaded' | null
+
+        // pHierCCval analysis state
+        let currentHierCCRaw = null;       // raw result from HierCC.compute()
+        let currentNMIMatrix = null;       // L × L NMI matrix
+        let currentSilhouetteScores = null; // level → silhouette score
 
         // DOM elements
         const fileInput = document.getElementById('file-input');
@@ -824,6 +895,14 @@
 
                 _populateHierCCPanel(null);
 
+                // Build raw assignments for pHierCCval analysis if data is loaded
+                if (currentData) {
+                    currentHierCCRaw = _buildRawFromUploadedHierCC(currentHierCC, currentData.strains);
+                    currentSilhouetteScores = null;
+                    currentNMIMatrix = HierCC.computeNMIMatrix(currentHierCCRaw);
+                    _displayPHierCCvalPlots();
+                }
+
             } catch (error) {
                 showError('Failed to load pHierCC file: ' + error.message);
             }
@@ -858,7 +937,13 @@
             currentHierCC._clusterCounts = rawResult.clusterCounts;
             hierccSource = 'computed';
 
+            // Store raw result for pHierCCval analysis
+            currentHierCCRaw = rawResult;
+            currentSilhouetteScores = null; // reset; recomputed on demand
+            currentNMIMatrix = HierCC.computeNMIMatrix(currentHierCCRaw);
+
             _populateHierCCPanel(rawResult.clusterCounts);
+            _displayPHierCCvalPlots();
         }
 
         /**
@@ -2065,6 +2150,348 @@
             URL.revokeObjectURL(url);
         }
         
+        // -----------------------------------------------------------------------
+        // pHierCCval: NMI heatmap + silhouette plot
+        // -----------------------------------------------------------------------
+
+        /**
+         * Convert uploaded HierCC clusterData to the same raw format as
+         * HierCC.compute() output so NMI / silhouette can be computed uniformly.
+         */
+        function _buildRawFromUploadedHierCC(hiercc, strains) {
+            const assignments = {};
+            for (const level of hiercc.hcLevels) {
+                const idMap = new Map();
+                let nextId = 1;
+                assignments[level] = strains.map(strain => {
+                    const val = hiercc.clusterData[strain] && hiercc.clusterData[strain][level];
+                    if (val == null || val === '') return 0;
+                    if (!idMap.has(val)) idMap.set(val, nextId++);
+                    return idMap.get(val);
+                });
+            }
+            return { levels: hiercc.hcLevels, assignments, clusterCounts: {} };
+        }
+
+        /** Render / refresh the pHierCCval analysis section. */
+        function _displayPHierCCvalPlots() {
+            if (!currentHierCCRaw || !currentNMIMatrix) return;
+
+            const plotsDiv = document.getElementById('phierccval-plots');
+            plotsDiv.innerHTML = '';
+
+            const levels = currentHierCCRaw.levels;
+            const chosenIndices = HierCC.detectChosenLevels(
+                currentNMIMatrix, currentSilhouetteScores, levels
+            );
+
+            // --- NMI heatmap ---
+            const nmiBlock = document.createElement('div');
+            nmiBlock.className = 'phierccval-plot-block';
+            const nmiLabel = document.createElement('div');
+            nmiLabel.className = 'phierccval-plot-label';
+            nmiLabel.textContent = 'Normalised Mutual Information — pairwise HC level comparison';
+            nmiBlock.appendChild(nmiLabel);
+            plotsDiv.appendChild(nmiBlock);
+            _renderNMIHeatmap(nmiBlock, currentNMIMatrix, levels, chosenIndices);
+
+            // --- Silhouette plot (or placeholder) ---
+            const silBlock = document.createElement('div');
+            silBlock.className = 'phierccval-plot-block';
+            plotsDiv.appendChild(silBlock);
+
+            if (currentSilhouetteScores) {
+                const silLabel = document.createElement('div');
+                silLabel.className = 'phierccval-plot-label';
+                silLabel.textContent = 'Silhouette Score at each HC Level';
+                silBlock.appendChild(silLabel);
+                _renderSilhouettePlot(silBlock, currentSilhouetteScores, levels, chosenIndices);
+                document.getElementById('silhouette-status').textContent =
+                    `Silhouette scores computed for ${levels.length} levels`;
+            } else {
+                const note = document.createElement('div');
+                note.className = 'silhouette-note';
+                note.textContent =
+                    'Silhouette scores require the pairwise distance matrix. ' +
+                    'Click "Compute Silhouette Scores" above to compute them.';
+                silBlock.appendChild(note);
+            }
+
+            document.getElementById('phierccval-section').style.display = 'block';
+        }
+
+        /** D3 NMI heatmap. */
+        function _renderNMIHeatmap(container, nmiMatrix, levels, chosenIndices) {
+            const L = levels.length;
+            const CELL = Math.max(30, Math.min(52, Math.floor(480 / L)));
+            const MARGIN = { top: 55, right: 30, bottom: Math.ceil(CELL * 1.8), left: 70 };
+            const plotW = L * CELL;
+            const plotH = L * CELL;
+            const width  = plotW + MARGIN.left + MARGIN.right;
+            const height = plotH + MARGIN.top  + MARGIN.bottom;
+
+            const colorScale = d3.scaleSequential([0, 1], d3.interpolatePurples);
+
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', [0, 0, width, height])
+                .style('max-width', '100%');
+
+            const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+
+            // Cells
+            for (let i = 0; i < L; i++) {
+                for (let j = 0; j < L; j++) {
+                    g.append('rect')
+                        .attr('x', j * CELL).attr('y', i * CELL)
+                        .attr('width', CELL).attr('height', CELL)
+                        .attr('fill', colorScale(nmiMatrix[i][j]))
+                        .attr('stroke', '#fff').attr('stroke-width', 0.5);
+                }
+            }
+
+            // Value labels (if cells large enough)
+            if (CELL >= 36) {
+                for (let i = 0; i < L; i++) {
+                    for (let j = 0; j < L; j++) {
+                        const v = nmiMatrix[i][j];
+                        g.append('text')
+                            .attr('x', j * CELL + CELL / 2).attr('y', i * CELL + CELL / 2)
+                            .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+                            .attr('font-size', '9px').attr('pointer-events', 'none')
+                            .attr('fill', v > 0.55 ? 'white' : '#555')
+                            .text(v.toFixed(2));
+                    }
+                }
+            }
+
+            // Stable-region dotted boxes: find maximal ranges where adjacent NMI ≥ 0.9
+            const STABLE_THRESH = 0.9;
+            const usedBoxes = new Set();
+            for (let start = 0; start < L; start++) {
+                let end = start;
+                while (end + 1 < L && nmiMatrix[start][end + 1] >= STABLE_THRESH) end++;
+                if (end > start) {
+                    const key = `${start}-${end}`;
+                    if (!usedBoxes.has(key)) {
+                        usedBoxes.add(key);
+                        g.append('rect')
+                            .attr('x', start * CELL - 1).attr('y', start * CELL - 1)
+                            .attr('width', (end - start + 1) * CELL + 2)
+                            .attr('height', (end - start + 1) * CELL + 2)
+                            .attr('fill', 'none')
+                            .attr('stroke', '#444').attr('stroke-width', 1.5)
+                            .attr('stroke-dasharray', '4 3').attr('rx', 2);
+                    }
+                }
+            }
+
+            // Red dashed lines for chosen levels
+            chosenIndices.forEach(idx => {
+                const cx = idx * CELL + CELL / 2;
+                const cy = idx * CELL + CELL / 2;
+                g.append('line').attr('x1', cx).attr('y1', 0).attr('x2', cx).attr('y2', plotH)
+                    .attr('stroke', '#e53e3e').attr('stroke-width', 1.5).attr('stroke-dasharray', '5 3');
+                g.append('line').attr('x1', 0).attr('y1', cy).attr('x2', plotW).attr('y2', cy)
+                    .attr('stroke', '#e53e3e').attr('stroke-width', 1.5).attr('stroke-dasharray', '5 3');
+            });
+
+            // Axis labels
+            levels.forEach((l, i) => {
+                g.append('text').attr('x', -6).attr('y', i * CELL + CELL / 2)
+                    .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
+                    .attr('font-size', '11px').attr('fill', '#444').text(l);
+                g.append('text')
+                    .attr('transform', `translate(${i * CELL + CELL / 2},${plotH + 5}) rotate(45)`)
+                    .attr('text-anchor', 'start').attr('dominant-baseline', 'middle')
+                    .attr('font-size', '11px').attr('fill', '#444').text(l);
+            });
+
+            // Color legend
+            const defs = svg.append('defs');
+            const grad = defs.append('linearGradient').attr('id', 'nmi-grad').attr('x1', '0%').attr('x2', '100%');
+            for (let k = 0; k <= 10; k++) {
+                grad.append('stop').attr('offset', `${k * 10}%`).attr('stop-color', colorScale(k / 10));
+            }
+            const legW = 120, legH = 12;
+            const legG = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top - 42})`);
+            legG.append('rect').attr('width', legW).attr('height', legH)
+                .attr('fill', 'url(#nmi-grad)').attr('stroke', '#bbb').attr('stroke-width', 0.5);
+            legG.append('text').attr('x', 0).attr('y', legH + 12).attr('font-size', '10px').text('0');
+            legG.append('text').attr('x', legW).attr('y', legH + 12).attr('text-anchor', 'end').attr('font-size', '10px').text('1');
+            legG.append('text').attr('x', legW / 2).attr('y', -4).attr('text-anchor', 'middle')
+                .attr('font-size', '10px').attr('font-weight', '600').attr('fill', '#666').text('NMI');
+
+            // Legend annotation
+            const annoG = svg.append('g')
+                .attr('transform', `translate(${MARGIN.left + legW + 20},${MARGIN.top - 42})`);
+            annoG.append('line').attr('x1', 0).attr('y1', 6).attr('x2', 20).attr('y2', 6)
+                .attr('stroke', '#e53e3e').attr('stroke-width', 1.5).attr('stroke-dasharray', '5 3');
+            annoG.append('text').attr('x', 24).attr('y', 10).attr('font-size', '10px').attr('fill', '#666')
+                .text('chosen level');
+            annoG.append('rect').attr('x', 0).attr('y', 18).attr('width', 20).attr('height', 10)
+                .attr('fill', 'none').attr('stroke', '#444').attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '4 3');
+            annoG.append('text').attr('x', 24).attr('y', 27).attr('font-size', '10px').attr('fill', '#666')
+                .text('stable region (NMI ≥ 0.9)');
+        }
+
+        /** D3 silhouette line chart. */
+        function _renderSilhouettePlot(container, silhouetteScores, levels, chosenIndices) {
+            const L = levels.length;
+            const MARGIN = { top: 30, right: 30, bottom: 55, left: 60 };
+            const plotW = Math.max(380, L * 52);
+            const plotH = 200;
+            const width  = plotW + MARGIN.left + MARGIN.right;
+            const height = plotH + MARGIN.top  + MARGIN.bottom;
+
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', [0, 0, width, height])
+                .style('max-width', '100%');
+
+            const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+
+            const x = d3.scaleBand().domain(levels).range([0, plotW]).padding(0.15);
+            const validScores = levels.map(l => silhouetteScores[l]).filter(s => !isNaN(s));
+            const yMin = Math.min(0, d3.min(validScores) ?? 0);
+            const yMax = Math.max(0.1, d3.max(validScores) ?? 1);
+            const y = d3.scaleLinear().domain([yMin - 0.05, yMax + 0.05]).range([plotH, 0]).nice();
+
+            // Shaded bands for chosen (stable) levels
+            chosenIndices.forEach(idx => {
+                const lName = levels[idx];
+                if (isNaN(silhouetteScores[lName])) return;
+                const bx = x(lName);
+                const bw = x.bandwidth();
+                g.append('rect').attr('x', bx - 2).attr('y', 0)
+                    .attr('width', bw + 4).attr('height', plotH)
+                    .attr('fill', 'rgba(102,126,234,0.13)').attr('rx', 3);
+            });
+
+            // Zero baseline
+            g.append('line').attr('x1', 0).attr('y1', y(0)).attr('x2', plotW).attr('y2', y(0))
+                .attr('stroke', '#e0e0e0').attr('stroke-width', 1);
+
+            // Line
+            const lineData = levels
+                .map(l => ({ level: l, score: silhouetteScores[l] }))
+                .filter(d => !isNaN(d.score));
+
+            g.append('path')
+                .datum(lineData)
+                .attr('fill', 'none')
+                .attr('stroke', '#667eea')
+                .attr('stroke-width', 2.5)
+                .attr('d', d3.line()
+                    .x(d => x(d.level) + x.bandwidth() / 2)
+                    .y(d => y(d.score)));
+
+            // Points
+            g.selectAll('circle')
+                .data(lineData)
+                .join('circle')
+                .attr('cx', d => x(d.level) + x.bandwidth() / 2)
+                .attr('cy', d => y(d.score))
+                .attr('r', 5)
+                .attr('fill', d => chosenIndices.includes(levels.indexOf(d.level)) ? '#e53e3e' : '#667eea')
+                .attr('stroke', 'white').attr('stroke-width', 1.5)
+                .append('title').text(d => `${d.level}: ${d.score.toFixed(4)}`);
+
+            // Axes
+            g.append('g').attr('transform', `translate(0,${plotH})`)
+                .call(d3.axisBottom(x).tickSizeOuter(0));
+            g.append('g').call(d3.axisLeft(y).ticks(5).tickFormat(d3.format('.2f')));
+
+            // Axis labels
+            svg.append('text')
+                .attr('x', MARGIN.left + plotW / 2).attr('y', height - 8)
+                .attr('text-anchor', 'middle').attr('font-size', '12px').attr('fill', '#555')
+                .text('HC Level');
+            svg.append('text')
+                .attr('transform', `translate(14,${MARGIN.top + plotH / 2}) rotate(-90)`)
+                .attr('text-anchor', 'middle').attr('font-size', '12px').attr('fill', '#555')
+                .text('Silhouette Score');
+
+            // Legend annotation
+            const annoG = svg.append('g')
+                .attr('transform', `translate(${MARGIN.left + 10},${MARGIN.top + 8})`);
+            annoG.append('rect').attr('width', 14).attr('height', 14)
+                .attr('fill', 'rgba(102,126,234,0.13)').attr('rx', 2);
+            annoG.append('text').attr('x', 18).attr('y', 11).attr('font-size', '10px').attr('fill', '#888')
+                .text('stable (local max)');
+            annoG.append('circle').attr('cx', 7 + 120).attr('cy', 7).attr('r', 5)
+                .attr('fill', '#e53e3e').attr('stroke', 'white').attr('stroke-width', 1.5);
+            annoG.append('text').attr('x', 18 + 120).attr('y', 11).attr('font-size', '10px').attr('fill', '#888')
+                .text('chosen level');
+        }
+
+        // Compute silhouette scores button
+        document.getElementById('compute-silhouette-btn').addEventListener('click', async () => {
+            if (!currentHierCCRaw) {
+                showError('Compute or load pHierCC clusters first');
+                return;
+            }
+            const nStrains = currentHierCCRaw.assignments[currentHierCCRaw.levels[0]]?.length ?? 0;
+            if (nStrains > 1000) {
+                const ok = window.confirm(
+                    `Silhouette computation requires an ${nStrains}×${nStrains} distance matrix ` +
+                    `and O(n²) work per HC level — this may take a while for large datasets. Continue?`
+                );
+                if (!ok) return;
+            }
+            try {
+                hideError();
+                showProgress();
+                const silStatus = document.getElementById('silhouette-status');
+                silStatus.textContent = '';
+
+                if (!currentMatrix) {
+                    if (!currentData || !grapetree) {
+                        hideProgress();
+                        showError('Load a data file and compute the tree first');
+                        return;
+                    }
+                    silStatus.textContent = 'Computing distance matrix…';
+                    const matrixType = document.getElementById('matrix-select').value;
+                    const missing    = parseInt(document.getElementById('missing-select').value);
+                    currentMatrix = grapetree.computeDistanceMatrix(currentData, matrixType, missing);
+                }
+
+                silStatus.textContent = 'Computing silhouette scores…';
+                currentSilhouetteScores = HierCC.computeSilhouetteScores(
+                    currentHierCCRaw, currentMatrix.matrix
+                );
+                hideProgress();
+                _displayPHierCCvalPlots();
+            } catch (err) {
+                hideProgress();
+                showError('Silhouette computation failed: ' + err.message);
+            }
+        });
+
+        // Download pHierCCval plots as SVG
+        document.getElementById('download-phierccval-svg-btn').addEventListener('click', () => {
+            const plotsDiv = document.getElementById('phierccval-plots');
+            const svgs = Array.from(plotsDiv.querySelectorAll('svg'));
+            if (!svgs.length) { showError('No plots to download'); return; }
+
+            const totalH = svgs.reduce((s, el) => s + el.height.baseVal.value, 0);
+            const maxW   = Math.max(...svgs.map(el => el.width.baseVal.value));
+            let combined = `<svg xmlns="http://www.w3.org/2000/svg" width="${maxW}" height="${totalH}" style="background:white;">`;
+            let yOff = 0;
+            svgs.forEach(el => {
+                combined += `<g transform="translate(0,${yOff})">${el.innerHTML}</g>`;
+                yOff += el.height.baseVal.value;
+            });
+            combined += '</svg>';
+            downloadFile(combined, 'phierccval_plots.svg', 'image/svg+xml');
+        });
+
         // Initialize on load
         init();
     </script>
