@@ -314,6 +314,101 @@
             margin-top: 4px;
             font-style: italic;
         }
+
+        /* pHierCC cluster panel */
+        .hiercc-panel {
+            background: #f0f4ff;
+            border: 1px solid #c5d0f5;
+            border-radius: 6px;
+            padding: 1rem 1.25rem;
+            margin-top: 1rem;
+        }
+
+        .hiercc-panel label {
+            font-weight: 700;
+            color: #4a5dad;
+        }
+
+        .hc-slider-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        #hc-level-select {
+            flex: 1;
+            padding: 0.5rem;
+            border: 2px solid #c5d0f5;
+            border-radius: 4px;
+            font-size: 0.95rem;
+            background: white;
+        }
+
+        #hc-level-select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .hc-stats {
+            font-size: 0.82rem;
+            color: #666;
+            margin-top: 0.4rem;
+        }
+
+        /* Cluster selection — dimming non-selected nodes */
+        .node-dimmed {
+            opacity: 0.12;
+        }
+
+        .node-highlighted {
+            stroke: #333 !important;
+            stroke-width: 2.5px !important;
+        }
+
+        /* Legend item — clickable row for cluster selection */
+        .legend-item.selectable {
+            cursor: pointer;
+            border-radius: 3px;
+            padding: 2px 4px;
+            margin: 4px -4px;
+            transition: background 0.15s;
+        }
+
+        .legend-item.selectable:hover {
+            background: rgba(102, 126, 234, 0.08);
+        }
+
+        .legend-item.selectable.selected {
+            background: rgba(102, 126, 234, 0.18);
+            font-weight: 600;
+        }
+
+        .legend-item .cluster-count {
+            font-size: 0.72rem;
+            color: #999;
+            margin-left: auto;
+            white-space: nowrap;
+        }
+
+        .legend-clear-btn {
+            display: block;
+            width: 100%;
+            margin-top: 8px;
+            padding: 4px 0;
+            font-size: 0.78rem;
+            color: #667eea;
+            background: none;
+            border: 1px solid #c5d0f5;
+            border-radius: 3px;
+            cursor: pointer;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .legend-clear-btn:hover {
+            background: rgba(102, 126, 234, 0.08);
+        }
     </style>
 </head>
 <body>
@@ -347,7 +442,31 @@
                     Supported: Tab or comma delimited files with ID column
                 </small>
             </div>
-            
+
+            <div class="control-group">
+                <label for="hiercc-input">Upload pHierCC Clusters (Optional)</label>
+                <input type="file" id="hiercc-input" accept=".txt,.tsv,.gz">
+                <small style="color: #999; margin-top: 0.5rem; display: block;">
+                    HC clusters are <strong>computed automatically</strong> from the MST after tree computation.
+                    Upload a <a href="https://github.com/zheminzhou/pHierCC" target="_blank" rel="noopener noreferrer" style="color:#667eea;">pHierCC</a>
+                    output file (.HierCC.gz or tab-delimited) only if you need external cluster assignments.
+                </small>
+            </div>
+
+            <!-- HC level selector — shown after pHierCC file upload OR tree computation -->
+            <div class="hiercc-panel" id="hiercc-panel" style="display:none;">
+                <label>pHierCC Cluster Level
+                    <span id="hiercc-source-badge"
+                          style="font-weight:400;font-size:0.75rem;color:#888;margin-left:0.5rem;"></span>
+                </label>
+                <div class="hc-slider-row">
+                    <select id="hc-level-select" title="Select hierarchical clustering level">
+                        <option value="">Select HC level…</option>
+                    </select>
+                </div>
+                <div class="hc-stats" id="hc-stats"></div>
+            </div>
+
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
                 <div class="control-group">
                     <label for="method-select">Tree Method</label>
@@ -475,7 +594,8 @@
     <script type="module">
         import GrapeTreeWASM from './wasm_loader.js';
         import FileHandler from './file_handler.js';
-        
+        import HierCC from './hiercc.js';
+
         // Initialize application
         let grapetree = null;
         let fileHandler = new FileHandler();
@@ -488,6 +608,12 @@
         // Custom per-value color overrides (persisted across re-renders)
         let customFillColors = {};   // { metadataValue: '#rrggbb' }
         let customRingColors = {};   // { metadataValue: '#rrggbb' }
+
+        // pHierCC cluster state
+        let currentHierCC = null;    // { clusterData, hcLevels }
+        let currentHCLevel = null;   // currently selected HC level string, e.g. 'HC10'
+        let selectedClusters = new Set(); // cluster values selected for highlighting
+        let hierccSource = null;     // 'computed' | 'uploaded' | null
 
         // DOM elements
         const fileInput = document.getElementById('file-input');
@@ -504,6 +630,10 @@
         const colorSchemeSelect = document.getElementById('color-scheme-select');
         const edgeScaleSelect = document.getElementById('edge-scale-select');
         const statusInfo = document.getElementById('status-info');
+        const hierccInput = document.getElementById('hiercc-input');
+        const hierccPanel = document.getElementById('hiercc-panel');
+        const hcLevelSelect = document.getElementById('hc-level-select');
+        const hcStats = document.getElementById('hc-stats');
         const errorMessage = document.getElementById('error-message');
         const progressBar = document.getElementById('progress-bar');
         const treeInfo = document.getElementById('tree-info');
@@ -586,6 +716,7 @@
                     }
 
                     displayTree(currentTree);
+                    computeHierCCFromTree();
                 } else {
                     statusInfo.textContent =
                         `Loaded ${currentData.strains.length} strains with ` +
@@ -625,14 +756,186 @@
             }
         });
 
+        // pHierCC file upload handler
+        hierccInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                statusInfo.textContent = `Loading pHierCC file ${file.name}…`;
+                currentHierCC = await fileHandler.parseHierCC(file);
+                hierccSource = 'uploaded';
+
+                const nStrains = Object.keys(currentHierCC.clusterData).length;
+                statusInfo.textContent =
+                    `Loaded pHierCC file: ${nStrains} strains × ${currentHierCC.hcLevels.length} HC levels`;
+
+                _populateHierCCPanel(null);
+
+            } catch (error) {
+                showError('Failed to load pHierCC file: ' + error.message);
+            }
+        });
+
+        // HC level selector change handler
+        hcLevelSelect.addEventListener('change', () => {
+            const level = hcLevelSelect.value;
+            if (!level || !currentHierCC) return;
+
+            currentHCLevel = level;
+            selectedClusters = new Set();
+            applyHierCCLevel(level);
+        });
+
+        /**
+         * Compute pHierCC clusters from the current MST and populate the panel.
+         * Called automatically after every tree computation.
+         * An uploaded pHierCC file always takes precedence over this.
+         */
+        function computeHierCCFromTree() {
+            if (!currentTree || !currentData) return;
+
+            const rawResult = HierCC.compute(
+                currentTree.edges,
+                currentData.strains.length
+            );
+
+            // Convert array-based result to the per-strain dict used by applyHierCCLevel
+            currentHierCC = HierCC.buildClusterData(currentData.strains, rawResult);
+            // Also attach raw cluster counts for stats display
+            currentHierCC._clusterCounts = rawResult.clusterCounts;
+            hierccSource = 'computed';
+
+            _populateHierCCPanel(rawResult.clusterCounts);
+        }
+
+        /**
+         * Populate the HC level dropdown and panel UI.
+         * Called by both computeHierCCFromTree and the file-upload handler.
+         *
+         * @param {Object|null} clusterCounts - level → count (optional, for computed results)
+         */
+        function _populateHierCCPanel(clusterCounts = null) {
+            currentHCLevel = null;
+            selectedClusters = new Set();
+
+            hcLevelSelect.innerHTML = '<option value="">Select HC level…</option>';
+            currentHierCC.hcLevels.forEach(level => {
+                const opt = document.createElement('option');
+                opt.value = level;
+                const count = clusterCounts ? clusterCounts[level] : null;
+                opt.textContent = count !== null ? `${level}  (${count} cluster${count === 1 ? '' : 's'})` : level;
+                hcLevelSelect.appendChild(opt);
+            });
+
+            hierccPanel.style.display = 'block';
+
+            const badge = document.getElementById('hiercc-source-badge');
+            if (badge) {
+                badge.textContent = hierccSource === 'computed'
+                    ? '— computed from MST'
+                    : '— loaded from file';
+            }
+
+            const nStrains = Object.keys(currentHierCC.clusterData).length;
+            if (clusterCounts) {
+                // For computed results, pick a sensible default level
+                // (first level with >1 cluster but <nStrains clusters)
+                const sensible = currentHierCC.hcLevels.find(l => {
+                    const c = clusterCounts[l];
+                    return c > 1 && c < nStrains;
+                });
+                if (sensible) {
+                    hcLevelSelect.value = sensible;
+                    currentHCLevel = sensible;
+                    applyHierCCLevel(sensible);
+                    return; // stats set by applyHierCCLevel
+                }
+            }
+
+            hcStats.textContent =
+                `${currentHierCC.hcLevels.length} levels available ` +
+                `(${currentHierCC.hcLevels[0]} – ${currentHierCC.hcLevels[currentHierCC.hcLevels.length - 1]})`;
+        }
+
+        /**
+         * Inject the selected HC level's cluster assignments into currentMetadata,
+         * then update the color-by selectors and re-render the tree.
+         */
+        function applyHierCCLevel(level) {
+            if (!currentHierCC || !currentData) {
+                showError('Load a data file before selecting an HC level');
+                return;
+            }
+
+            const fieldName = `HierCC_${level}`;
+
+            // Build/update metadata from pHierCC data
+            if (!currentMetadata) currentMetadata = {};
+
+            // Remove any previously injected HierCC_ fields
+            currentData.strains.forEach(strain => {
+                if (!currentMetadata[strain]) currentMetadata[strain] = {};
+                // Remove old HierCC_ keys
+                Object.keys(currentMetadata[strain])
+                    .filter(k => k.startsWith('HierCC_'))
+                    .forEach(k => delete currentMetadata[strain][k]);
+            });
+
+            let matched = 0;
+            let unmatched = 0;
+            currentData.strains.forEach(strain => {
+                const assignment = currentHierCC.clusterData[strain];
+                if (assignment && assignment[level] !== undefined && assignment[level] !== '') {
+                    currentMetadata[strain][fieldName] = String(assignment[level]);
+                    matched++;
+                } else {
+                    currentMetadata[strain][fieldName] = 'Unknown';
+                    unmatched++;
+                }
+            });
+
+            // Rebuild the metadata fields list to include the new HierCC field
+            // Collect all unique field names across all strains
+            const allFields = new Set();
+            Object.values(currentMetadata).forEach(obj => {
+                if (obj && typeof obj === 'object') Object.keys(obj).forEach(k => allFields.add(k));
+            });
+
+            // Re-populate the color dropdowns
+            const fields = Array.from(allFields);
+            populateMetadataSelects(fields);
+
+            // Auto-select the HierCC field for fill color
+            colorSelect.value = fieldName;
+            customFillColors = {};
+
+            // Count clusters at this level
+            const clusterCounts = {};
+            currentData.strains.forEach(strain => {
+                const val = currentMetadata[strain] && currentMetadata[strain][fieldName];
+                if (val) clusterCounts[val] = (clusterCounts[val] || 0) + 1;
+            });
+            const nClusters = Object.keys(clusterCounts).filter(k => k !== 'Unknown').length;
+
+            hcStats.textContent =
+                `${level}: ${nClusters} clusters, ` +
+                `${matched} strains matched` +
+                (unmatched > 0 ? `, ${unmatched} unmatched` : '');
+
+            if (currentTree) displayTree(currentTree);
+        }
+
         // Color selection handlers
         colorSelect.addEventListener('change', () => {
             customFillColors = {};
+            selectedClusters = new Set();
             if (currentTree) displayTree(currentTree);
         });
 
         ringColorSelect.addEventListener('change', () => {
             customRingColors = {};
+            selectedClusters = new Set();
             if (currentTree) displayTree(currentTree);
         });
 
@@ -695,9 +998,13 @@
                 downloadNewickBtn.disabled = false;
                 downloadJsonBtn.disabled = false;
                 
-                // Display tree (placeholder - would integrate D3.js visualization)
+                // Display tree
                 displayTree(currentTree);
-                
+
+                // Auto-compute pHierCC clusters from the MST
+                // (skipped if the user already uploaded a pHierCC file)
+                computeHierCCFromTree();
+
             } catch (error) {
                 hideProgress();
                 showError('Tree computation failed: ' + error.message);
@@ -1101,7 +1408,20 @@
                     return 'none';
                 })
                 .attr('stroke-width', RING_WIDTH)
+                .attr('opacity', d => {
+                    if (selectedClusters.size === 0) return 1;
+                    const v = nodeClusterValue(d);
+                    return selectedClusters.has(v) ? 1 : 0.12;
+                })
                 .style('pointer-events', 'none');
+
+            // Helper: get the metadata value used for fill color for a given node
+            function nodeClusterValue(d) {
+                if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
+                    return currentMetadata[d.name][selectedColumn] || null;
+                }
+                return null;
+            }
 
             // --- Nodes (circles sized by count, like original GrapeTree) ---
             const node = g.append('g').attr('class', 'node-group')
@@ -1110,14 +1430,16 @@
                 .join('circle')
                 .attr('r', nodeRadius)
                 .attr('fill', d => {
-                    if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
-                        const v = currentMetadata[d.name][selectedColumn];
-                        if (v && colorMapping[v]) return colorMapping[v];
-                    }
-                    return '#ccc';
+                    const v = nodeClusterValue(d);
+                    return (v && colorMapping[v]) ? colorMapping[v] : '#ccc';
                 })
                 .attr('stroke', '#fff')
                 .attr('stroke-width', 1.5)
+                .attr('opacity', d => {
+                    if (selectedClusters.size === 0) return 1;
+                    const v = nodeClusterValue(d);
+                    return selectedClusters.has(v) ? 1 : 0.12;
+                })
                 .style('cursor', 'pointer')
                 .call(d3.drag()
                     .on('start', dragstarted)
@@ -1191,9 +1513,18 @@
                 event.subject.fy = null;
             }
 
-            // --- Legend with interactive color swatches ---
+            // --- Legend with interactive color swatches and cluster selection ---
             const hasFill = selectedColumn && uniqueValues.size > 0;
             const hasRing = ringColumn && uniqueRingValues.size > 0;
+
+            // Build a count map for the fill column (used for cluster counts in legend)
+            const fillValueCounts = {};
+            if (hasFill && currentMetadata) {
+                currentData.strains.forEach(strain => {
+                    const v = currentMetadata[strain] && currentMetadata[strain][selectedColumn];
+                    if (v) fillValueCounts[v] = (fillValueCounts[v] || 0) + 1;
+                });
+            }
 
             if (hasFill || hasRing) {
                 const legend = document.createElement('div');
@@ -1201,29 +1532,36 @@
                 let legendHTML = '';
 
                 if (hasFill) {
-                    const label = hasRing
-                        ? `<div class="legend-section-title">Fill: ${selectedColumn}</div>`
-                        : `<div class="legend-title">${selectedColumn}</div>`;
-                    legendHTML += label;
+                    const titleText = hasRing
+                        ? `<div class="legend-section-title">Fill: ${escapeAttr(selectedColumn)}</div>`
+                        : `<div class="legend-title">${escapeAttr(selectedColumn)}</div>`;
+                    legendHTML += titleText;
                     Array.from(uniqueValues).sort().forEach(value => {
                         const color = colorMapping[value] || '#ccc';
+                        const count = fillValueCounts[value] || 0;
+                        const isSelected = selectedClusters.has(value);
                         legendHTML += `
-                            <div class="legend-item">
+                            <div class="legend-item selectable${isSelected ? ' selected' : ''}"
+                                 data-cluster-value="${escapeAttr(value)}" title="Click row to select/deselect cluster">
                                 <div class="legend-color-swatch" title="Click to change color"
                                      data-type="fill" data-value="${escapeAttr(value)}"
                                      style="background-color: ${color};">
                                     <input class="legend-color-input" type="color" value="${color}">
                                 </div>
-                                <div class="legend-label">${value}</div>
+                                <div class="legend-label">${escapeAttr(String(value))}</div>
+                                <div class="cluster-count">${count}</div>
                             </div>`;
                     });
+                    if (selectedClusters.size > 0) {
+                        legendHTML += `<button class="legend-clear-btn" id="legend-clear-btn">Clear selection</button>`;
+                    }
                 }
 
                 if (hasRing) {
-                    const label = hasFill
-                        ? `<div class="legend-section-title" style="margin-top:10px;">Ring: ${ringColumn}</div>`
-                        : `<div class="legend-title">${ringColumn}</div>`;
-                    legendHTML += label;
+                    const titleText = hasFill
+                        ? `<div class="legend-section-title" style="margin-top:10px;">Ring: ${escapeAttr(ringColumn)}</div>`
+                        : `<div class="legend-title">${escapeAttr(ringColumn)}</div>`;
+                    legendHTML += titleText;
                     Array.from(uniqueRingValues).sort().forEach(value => {
                         const color = ringColorMapping[value] || '#999';
                         legendHTML += `
@@ -1233,24 +1571,85 @@
                                      style="border-color: ${color};">
                                     <input class="legend-color-input" type="color" value="${color}">
                                 </div>
-                                <div class="legend-label">${value}</div>
+                                <div class="legend-label">${escapeAttr(String(value))}</div>
                             </div>`;
                     });
                 }
 
-                legendHTML += '<div class="swatch-hint">Click swatch to change color</div>';
+                legendHTML += '<div class="swatch-hint">Click row to select cluster · Click swatch to change color</div>';
                 legend.innerHTML = legendHTML;
                 canvas.appendChild(legend);
 
-                // Wire up color pickers on the swatches
+                // --- Cluster row selection ---
+                legend.querySelectorAll('.legend-item.selectable').forEach(row => {
+                    row.addEventListener('click', (e) => {
+                        // Don't fire when user clicked the color swatch or its input
+                        if (e.target.closest('.legend-color-swatch')) return;
+                        const value = row.dataset.clusterValue;
+                        if (!value) return;
+                        if (selectedClusters.has(value)) {
+                            selectedClusters.delete(value);
+                        } else {
+                            selectedClusters.add(value);
+                        }
+                        // Update node/ring opacity live without full re-render
+                        d3.select('#tree-canvas .node-group').selectAll('circle')
+                            .attr('opacity', d => {
+                                if (selectedClusters.size === 0) return 1;
+                                const v = nodeClusterValue(d);
+                                return selectedClusters.has(v) ? 1 : 0.12;
+                            });
+                        d3.select('#tree-canvas .ring-group').selectAll('circle')
+                            .attr('opacity', d => {
+                                if (selectedClusters.size === 0) return 1;
+                                const v = nodeClusterValue(d);
+                                return selectedClusters.has(v) ? 1 : 0.12;
+                            });
+                        // Toggle selected class on the row
+                        row.classList.toggle('selected', selectedClusters.has(value));
+                        // Show/hide the clear button
+                        const clearBtn = legend.querySelector('#legend-clear-btn');
+                        if (clearBtn) {
+                            clearBtn.style.display = selectedClusters.size > 0 ? 'block' : 'none';
+                        } else if (selectedClusters.size > 0) {
+                            // Insert clear button if it doesn't exist yet
+                            const btn = document.createElement('button');
+                            btn.className = 'legend-clear-btn';
+                            btn.id = 'legend-clear-btn';
+                            btn.textContent = 'Clear selection';
+                            const hintDiv = legend.querySelector('.swatch-hint');
+                            legend.insertBefore(btn, hintDiv);
+                            btn.addEventListener('click', clearSelection);
+                        }
+                        // Update status bar
+                        if (selectedClusters.size > 0) {
+                            const nSelected = currentData.strains.filter(s => {
+                                const v = currentMetadata && currentMetadata[s] && currentMetadata[s][selectedColumn];
+                                return selectedClusters.has(v);
+                            }).length;
+                            statusInfo.textContent = `${selectedClusters.size} cluster(s) selected — ${nSelected} strains highlighted`;
+                        } else {
+                            statusInfo.textContent = `${currentTree.nNodes} nodes, ${currentTree.nEdges} edges`;
+                        }
+                    });
+                });
+
+                // Clear selection button
+                const clearBtnEl = legend.querySelector('#legend-clear-btn');
+                if (clearBtnEl) clearBtnEl.addEventListener('click', clearSelection);
+
+                function clearSelection() {
+                    selectedClusters = new Set();
+                    displayTree(currentTree);
+                }
+
+                // --- Color picker swatches ---
                 legend.querySelectorAll('.legend-color-swatch, .legend-ring-swatch').forEach(swatch => {
                     const input = swatch.querySelector('.legend-color-input');
-                    // Open picker on swatch click
                     swatch.addEventListener('click', (e) => {
                         e.stopPropagation();
                         input.click();
                     });
-                    // Apply color change (live update without full re-render)
                     input.addEventListener('input', (e) => {
                         const newColor = e.target.value;
                         const value = swatch.dataset.value;
@@ -1258,7 +1657,6 @@
                         if (type === 'fill') {
                             customFillColors[value] = newColor;
                             swatch.style.backgroundColor = newColor;
-                            // Live-update only node-group circles
                             d3.select('#tree-canvas .node-group').selectAll('circle')
                                 .filter(d => d && currentMetadata && currentMetadata[d.name] &&
                                              currentMetadata[d.name][selectedColumn] === value)
@@ -1266,7 +1664,6 @@
                         } else {
                             customRingColors[value] = newColor;
                             swatch.style.borderColor = newColor;
-                            // Live-update only ring-group circles
                             d3.select('#tree-canvas .ring-group').selectAll('circle')
                                 .filter(d => d && currentMetadata && currentMetadata[d.name] &&
                                              currentMetadata[d.name][ringColumn] === value)

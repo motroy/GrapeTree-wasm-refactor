@@ -289,6 +289,98 @@ class FileHandler {
         };
     }
 
+    /**
+     * Parse a pHierCC hierarchical clustering file.
+     * Accepts plain-text tab-delimited files or gzip-compressed (.gz) files.
+     *
+     * Expected format:
+     *   #ST_id  HC0  HC2  HC5  ...
+     *   1       1    1    1    ...
+     *   2       2    1    1    ...
+     *
+     * Returns:
+     *   {
+     *     clusterData: { stId: { HC0: '1', HC2: '1', ... }, ... },
+     *     hcLevels: ['HC0', 'HC2', 'HC5', ...]
+     *   }
+     */
+    async parseHierCC(file) {
+        let content;
+        if (file.name.toLowerCase().endsWith('.gz')) {
+            content = await this._readGzipFile(file);
+        } else {
+            content = await this._readFile(file);
+        }
+        return this._parseHierCCContent(content);
+    }
+
+    /**
+     * Decompress a gzip file and return its text content.
+     * Uses the Web Streams DecompressionStream API (Chrome 80+, Firefox 113+, Safari 16.4+).
+     */
+    async _readGzipFile(file) {
+        const buffer = await file.arrayBuffer();
+        const ds = new DecompressionStream('gzip');
+        const blob = new Blob([buffer]);
+        const stream = blob.stream().pipeThrough(ds);
+        const reader = stream.getReader();
+        const chunks = [];
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+        }
+        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+            combined.set(chunk, offset);
+            offset += chunk.length;
+        }
+        return new TextDecoder().decode(combined);
+    }
+
+    /**
+     * Parse tab-delimited pHierCC content into a structured object.
+     */
+    _parseHierCCContent(content) {
+        const lines = content.trim().split('\n');
+        if (lines.length < 2) {
+            throw new Error('pHierCC file must have a header and at least one data row');
+        }
+
+        // Parse header — first column is ST id, rest are HC levels
+        const header = lines[0].split('\t').map(h => h.trim());
+        // Strip leading '#' from first column; remainder are HC level names
+        const hcLevels = header.slice(1).filter(h => h.length > 0);
+
+        if (hcLevels.length === 0) {
+            throw new Error('pHierCC file must have at least one HC level column');
+        }
+
+        const clusterData = {};
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line || line.startsWith('#')) continue;
+
+            const fields = line.split('\t');
+            const stId = fields[0].trim();
+            if (!stId) continue;
+
+            clusterData[stId] = {};
+            hcLevels.forEach((level, j) => {
+                const val = fields[j + 1] !== undefined ? fields[j + 1].trim() : '';
+                clusterData[stId][level] = val;
+            });
+        }
+
+        if (Object.keys(clusterData).length === 0) {
+            throw new Error('No data rows found in pHierCC file');
+        }
+
+        return { clusterData, hcLevels };
+    }
+
     // Private helper methods
 
     async _readFile(file) {
