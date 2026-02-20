@@ -570,6 +570,14 @@
                         <option value="log">Logarithmic</option>
                     </select>
                 </div>
+
+                <div class="control-group">
+                    <label for="label-select">Label Nodes By</label>
+                    <select id="label-select">
+                        <option value="name" selected>Strain Name</option>
+                        <option value="">None</option>
+                    </select>
+                </div>
             </div>
             
             <div class="button-group" style="margin-top: 1.5rem;">
@@ -670,6 +678,7 @@
         const hcStats = document.getElementById('hc-stats');
         const downloadHierccBtn = document.getElementById('download-hiercc-btn');
         const shadeClustersCheck = document.getElementById('shade-clusters-check');
+        const labelSelect = document.getElementById('label-select');
         const errorMessage = document.getElementById('error-message');
         const progressBar = document.getElementById('progress-bar');
         const treeInfo = document.getElementById('tree-info');
@@ -678,14 +687,21 @@
         function populateMetadataSelects(fields) {
             colorSelect.innerHTML = '<option value="">None (Default)</option>';
             ringColorSelect.innerHTML = '<option value="">None</option>';
+            // Preserve current label selection across re-populates
+            const prevLabelVal = labelSelect.value;
+            labelSelect.innerHTML = '<option value="name">Strain Name</option><option value="">None</option>';
             fields.forEach(field => {
-                [colorSelect, ringColorSelect].forEach(sel => {
+                [colorSelect, ringColorSelect, labelSelect].forEach(sel => {
                     const option = document.createElement('option');
                     option.value = field;
                     option.textContent = field;
                     sel.appendChild(option);
                 });
             });
+            // Restore previous label selection if still valid
+            if (prevLabelVal && Array.from(labelSelect.options).some(o => o.value === prevLabelVal)) {
+                labelSelect.value = prevLabelVal;
+            }
             const hasFields = fields.length > 0;
             colorSelect.disabled = !hasFields;
             ringColorSelect.disabled = !hasFields;
@@ -1109,6 +1125,11 @@
             if (currentTree) displayTree(currentTree);
         });
 
+        // Label nodes select — re-render tree when changed
+        labelSelect.addEventListener('change', () => {
+            if (currentTree) displayTree(currentTree);
+        });
+
         // Download SVG
         document.getElementById('download-svg-btn').addEventListener('click', () => {
             const svg = document.querySelector('#tree-canvas svg');
@@ -1264,6 +1285,7 @@
 
             const selectedColumn = colorSelect.value;
             const ringColumn = ringColorSelect.value;
+            const labelColumn = labelSelect.value; // 'name', '', or a metadata field name
             const edgeScale = edgeScaleSelect.value;
             const colorScheme = getColorScheme();
 
@@ -1439,13 +1461,15 @@
 
                 const HULL_PADDING = nodeRadius + 14;
 
-                const hullData = Object.entries(clusters).map(([value, pts]) => {
+                const hullData = Object.entries(clusters)
+                    .filter(([, pts]) => pts.length > 1) // only clusters with more than 1 node
+                    .map(([value, pts]) => {
                     let hull;
                     if (pts.length >= 3) {
                         const raw = d3.polygonHull(pts);
                         hull = raw ? expandHullPoints(raw, HULL_PADDING) : null;
-                    } else if (pts.length === 2) {
-                        // Approximate capsule with a small expanded polygon
+                    } else {
+                        // Exactly 2 points — approximate capsule with a small expanded polygon
                         const dx = pts[1][0] - pts[0][0];
                         const dy = pts[1][1] - pts[0][1];
                         const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -1457,11 +1481,6 @@
                             [pts[1][0] - nx, pts[1][1] - ny],
                             [pts[0][0] - nx, pts[0][1] - ny]
                         ];
-                    } else {
-                        // Single point — small square placeholder (circle drawn via rx)
-                        const [x, y] = pts[0];
-                        const r = HULL_PADDING;
-                        hull = [[x - r, y - r], [x + r, y - r], [x + r, y + r], [x - r, y + r]];
                     }
                     return { value, hull };
                 }).filter(d => d.hull);
@@ -1585,7 +1604,7 @@
                 return text;
             });
 
-            // Node labels
+            // Node labels — text determined by "Label Nodes By" selection
             const label = g.append('g')
                 .selectAll('text')
                 .data(nodes)
@@ -1595,7 +1614,16 @@
                 .attr('dy', '0.35em')
                 .style('fill', '#333')
                 .style('pointer-events', 'none')
-                .text(d => d.name);
+                .text(d => {
+                    if (!labelColumn) return ''; // 'None'
+                    if (labelColumn === 'name') return d.name;
+                    // Metadata field
+                    if (currentMetadata && currentMetadata[d.name]) {
+                        const v = currentMetadata[d.name][labelColumn];
+                        return v != null ? String(v) : '';
+                    }
+                    return '';
+                });
 
             // --- Tick ---
             simulation.on('tick', () => {
@@ -1664,7 +1692,9 @@
                         ? `<div class="legend-section-title">Fill: ${escapeAttr(selectedColumn)}</div>`
                         : `<div class="legend-title">${escapeAttr(selectedColumn)}</div>`;
                     legendHTML += titleText;
-                    Array.from(uniqueValues).sort().forEach(value => {
+                    // Only show clusters with more than 1 node in the legend
+                    const multiNodeValues = Array.from(uniqueValues).filter(v => (fillValueCounts[v] || 0) > 1);
+                    multiNodeValues.sort().forEach(value => {
                         const color = colorMapping[value] || '#ccc';
                         const count = fillValueCounts[value] || 0;
                         const isSelected = selectedClusters.has(value);
