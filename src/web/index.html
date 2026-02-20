@@ -1284,6 +1284,8 @@
             const height = 600;
 
             const selectedColumn = colorSelect.value;
+            const hcSelectedLevel = hcLevelSelect ? hcLevelSelect.value : '';
+            const hullClusterColumn = (hcSelectedLevel && currentHierCC) ? `HierCC_${hcSelectedLevel}` : null;
             const ringColumn = ringColorSelect.value;
             const labelColumn = labelSelect.value; // 'name', '', or a metadata field name
             const edgeScale = edgeScaleSelect.value;
@@ -1301,6 +1303,20 @@
                 Array.from(uniqueValues).sort().forEach((v, i) => {
                     // Use custom override if user has set one, else use palette
                     colorMapping[v] = customFillColors[v] || palette(i);
+                });
+            }
+
+            // Build hull color mapping from selected pHierCC level (independent of fill color selection)
+            let hullColorMapping = {};
+            if (hullClusterColumn && currentMetadata) {
+                const hullValues = new Set();
+                Object.keys(currentMetadata).forEach(strain => {
+                    const val = currentMetadata[strain] && currentMetadata[strain][hullClusterColumn];
+                    if (val && val !== 'Unknown') hullValues.add(val);
+                });
+                const hullPalette = d3.scaleOrdinal(colorScheme);
+                Array.from(hullValues).sort().forEach((v, i) => {
+                    hullColorMapping[v] = hullPalette(i);
                 });
             }
 
@@ -1431,7 +1447,7 @@
                 .on('zoom', ({ transform }) => g.attr('transform', transform)));
 
             // --- Cluster hull shading (rendered behind everything else) ---
-            const showShading = shadeClustersCheck && shadeClustersCheck.checked && selectedColumn && currentMetadata;
+            const showShading = shadeClustersCheck && shadeClustersCheck.checked && hullClusterColumn && currentMetadata;
             const hullGroup = g.append('g').attr('class', 'hull-group');
 
             function expandHullPoints(points, padding) {
@@ -1449,10 +1465,10 @@
             function updateHulls() {
                 if (!showShading) { hullGroup.selectAll('*').remove(); return; }
 
-                // Gather node positions by cluster value
+                // Gather node positions by pHierCC cluster level value
                 const clusters = {};
                 nodes.forEach(d => {
-                    const v = nodeClusterValue(d);
+                    const v = nodeHullClusterValue(d);
                     if (v && v !== 'Unknown') {
                         if (!clusters[v]) clusters[v] = [];
                         clusters[v].push([d.x, d.y]);
@@ -1489,8 +1505,8 @@
                     .data(hullData, d => d.value)
                     .join('path')
                     .attr('class', 'cluster-hull')
-                    .attr('fill', d => colorMapping[d.value] || '#ccc')
-                    .attr('stroke', d => colorMapping[d.value] || '#ccc')
+                    .attr('fill', d => hullColorMapping[d.value] || '#ccc')
+                    .attr('stroke', d => hullColorMapping[d.value] || '#ccc')
                     .attr('d', d => 'M' + d.hull.join('L') + 'Z');
             }
 
@@ -1564,6 +1580,14 @@
             function nodeClusterValue(d) {
                 if (selectedColumn && currentMetadata && currentMetadata[d.name]) {
                     return currentMetadata[d.name][selectedColumn] || null;
+                }
+                return null;
+            }
+
+            // Helper: get the pHierCC cluster value for hull shading (always uses selected HC level)
+            function nodeHullClusterValue(d) {
+                if (hullClusterColumn && currentMetadata && currentMetadata[d.name]) {
+                    return currentMetadata[d.name][hullClusterColumn] || null;
                 }
                 return null;
             }
