@@ -2,11 +2,7 @@
 // Handles CPU-intensive tasks in a background thread
 
 // Load the Emscripten-generated glue code
-try {
-    importScripts('grapetree.js');
-} catch (e) {
-    console.warn('Failed to load grapetree.js:', e);
-}
+importScripts('grapetree.js');
 
 let module = null;
 
@@ -152,9 +148,6 @@ onmessage = async function(e) {
         if (type === 'init') {
             if (!module) {
                 // GrapeTreeWASMModule is defined globally by grapetree.js
-                if (typeof GrapeTreeWASMModule === 'undefined') {
-                     throw new Error('GrapeTreeWASMModule is not defined. grapetree.js failed to load.');
-                }
                 module = await GrapeTreeWASMModule();
             }
             postMessage({ type: 'init_done', id });

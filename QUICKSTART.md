@@ -93,10 +93,10 @@ node -e "const gt = require('./build/grapetree.js'); console.log('OK');"
 
 ```bash
 # Copy WASM files to web directory
-cp build/grapetree.* src/web/
+cp build/grapetree.* web/
 
 # Start server
-cd src/web
+cd web
 python3 -m http.server 8080
 
 # Open browser
@@ -110,7 +110,7 @@ open http://localhost:8080
 make deploy
 
 # Serve
-cd src/web
+cd web
 python3 -m http.server 8080
 ```
 
