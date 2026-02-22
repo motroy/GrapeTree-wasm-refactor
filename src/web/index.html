@@ -919,6 +919,7 @@
         import GrapeTreeWASM from './wasm_loader.js';
         import FileHandler from './file_handler.js';
         import HierCC from './hiercc.js';
+        import Clustering from './clustering.js';
 
         // Initialize application
         let grapetree = null;
@@ -2365,9 +2366,15 @@
             const canvas = document.getElementById('tree-canvas');
             canvas.innerHTML = '';
 
-            const strainNames = matrixData.strainNames;
-            const matrix = matrixData.matrix;
-            const n = strainNames.length;
+            // Compute clustered order
+            const order = Clustering.computeMSTOrder(matrixData.matrix);
+
+            // Reorder strain names and matrix for display
+            const n = matrixData.strainNames.length;
+            const strainNames = order.map(i => matrixData.strainNames[i]);
+            // Note: we reorder rows/cols but keep values intact.
+            // Even if matrix is asymmetric, we permute both axes by same clustering order.
+            const matrix = order.map(i => order.map(j => matrixData.matrix[i][j]));
 
             // --- Cluster data (if an HC level is selected) ---
             const hcSelectedLevel = hcLevelSelect ? hcLevelSelect.value : '';
