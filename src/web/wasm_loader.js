@@ -5,6 +5,7 @@ class GrapeTreeWASM {
     constructor() {
         this.worker = null;
         this.isInitialized = false;
+        this.initError = null;
         this.pendingRequests = new Map();
         this.nextRequestId = 1;
     }
@@ -16,6 +17,9 @@ class GrapeTreeWASM {
     async init() {
         if (this.isInitialized) {
             return this;
+        }
+        if (this.initError) {
+             throw this.initError;
         }
         
         return new Promise((resolve, reject) => {
@@ -41,14 +45,15 @@ class GrapeTreeWASM {
                             request.reject(new Error(error));
                             this.pendingRequests.delete(id);
                         } else {
+                            // Global worker error
                             console.error('Worker error:', error);
-                            // If it's the init request
-                            if (!this.isInitialized) reject(new Error(error));
+                            if (!this.isInitialized) {
+                                this.initError = new Error(error);
+                                reject(this.initError);
+                            }
                         }
                     } else if (type === 'progress') {
                         // Forward progress to active request
-                        // Since worker processes sequentially, we send to all pending requests
-                        // (though typically only one is active)
                         for (const req of this.pendingRequests.values()) {
                             if (req.onProgress) {
                                 req.onProgress(task, value);
@@ -59,13 +64,16 @@ class GrapeTreeWASM {
 
                 this.worker.onerror = (e) => {
                     console.error('Worker error:', e);
-                    reject(new Error('Worker failed to start: ' + (e.message || 'Unknown error')));
+                    const error = new Error('Worker failed to start: ' + (e.message || 'Unknown error'));
+                    this.initError = error;
+                    reject(error);
                 };
 
                 this.worker.postMessage({ type: 'init' });
 
             } catch (error) {
                 console.error('Failed to initialize worker:', error);
+                this.initError = error;
                 reject(error);
             }
         });
@@ -202,7 +210,8 @@ class GrapeTreeWASM {
     
     _checkInitialized() {
         if (!this.isInitialized || !this.worker) {
-            throw new Error('WASM worker not initialized. Call init() first.');
+            const cause = this.initError ? `: ${this.initError.message}` : '. Call init() first.';
+            throw new Error(`WASM worker not initialized${cause}`);
         }
     }
     
