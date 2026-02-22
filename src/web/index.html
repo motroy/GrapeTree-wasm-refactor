@@ -1886,7 +1886,11 @@
                     .join('path')
                     .attr('class', 'cluster-hull')
                     .attr('fill', d => hullColorMapping[d.value] || '#ccc')
+                    .attr('fill-opacity', 0.18)
                     .attr('stroke', d => hullColorMapping[d.value] || '#ccc')
+                    .attr('stroke-width', 2)
+                    .attr('stroke-opacity', 0.4)
+                    .style('pointer-events', 'none')
                     .attr('d', d => 'M' + d.hull.join('L') + 'Z');
             }
 
