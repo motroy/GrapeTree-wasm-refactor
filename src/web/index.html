@@ -430,9 +430,6 @@
         }
 
         .cluster-hull {
-            opacity: 0.18;
-            stroke-width: 2;
-            stroke-opacity: 0.4;
             pointer-events: none;
         }
 
@@ -985,6 +982,12 @@
             document.querySelectorAll('.tab-pane').forEach(pane => {
                 pane.classList.toggle('active', pane.id === 'tab-' + tabId);
             });
+            // pHierCCval section is only relevant to the Clusters tab
+            const phierccvalSection = document.getElementById('phierccval-section');
+            if (phierccvalSection) {
+                phierccvalSection.style.display =
+                    (tabId === 'clusters' && currentNMIMatrix) ? 'block' : 'none';
+            }
         }
 
         function setTabBadge(tabId, text) {
@@ -2588,7 +2591,10 @@
                 silBlock.appendChild(note);
             }
 
-            document.getElementById('phierccval-section').style.display = 'block';
+            const activeTab = document.querySelector('.tab-btn.active');
+            if (activeTab && activeTab.dataset.tab === 'clusters') {
+                document.getElementById('phierccval-section').style.display = 'block';
+            }
         }
 
         /** D3 NMI heatmap. */
@@ -2648,25 +2654,37 @@
                     const key = `${start}-${end}`;
                     if (!usedBoxes.has(key)) {
                         usedBoxes.add(key);
-                        g.append('rect')
-                            .attr('x', start * CELL - 1).attr('y', start * CELL - 1)
-                            .attr('width', (end - start + 1) * CELL + 2)
-                            .attr('height', (end - start + 1) * CELL + 2)
+                        const bx = start * CELL - 1, by = start * CELL - 1;
+                        const bw = (end - start + 1) * CELL + 2, bh = (end - start + 1) * CELL + 2;
+                        // White halo so the box is visible on dark cells
+                        g.append('rect').attr('x', bx).attr('y', by)
+                            .attr('width', bw).attr('height', bh)
                             .attr('fill', 'none')
-                            .attr('stroke', '#444').attr('stroke-width', 1.5)
-                            .attr('stroke-dasharray', '4 3').attr('rx', 2);
+                            .attr('stroke', 'white').attr('stroke-width', 4).attr('rx', 2);
+                        // Dashed box on top
+                        g.append('rect').attr('x', bx).attr('y', by)
+                            .attr('width', bw).attr('height', bh)
+                            .attr('fill', 'none')
+                            .attr('stroke', '#f6ad55').attr('stroke-width', 2.5)
+                            .attr('stroke-dasharray', '5 3').attr('rx', 2);
                     }
                 }
             }
 
-            // Red dashed lines for chosen levels
+            // Dashed lines for chosen levels (white halo + coloured line on top)
             chosenIndices.forEach(idx => {
                 const cx = idx * CELL + CELL / 2;
                 const cy = idx * CELL + CELL / 2;
-                g.append('line').attr('x1', cx).attr('y1', 0).attr('x2', cx).attr('y2', plotH)
-                    .attr('stroke', '#e53e3e').attr('stroke-width', 1.5).attr('stroke-dasharray', '5 3');
+                // Horizontal
                 g.append('line').attr('x1', 0).attr('y1', cy).attr('x2', plotW).attr('y2', cy)
-                    .attr('stroke', '#e53e3e').attr('stroke-width', 1.5).attr('stroke-dasharray', '5 3');
+                    .attr('stroke', 'white').attr('stroke-width', 4);
+                g.append('line').attr('x1', 0).attr('y1', cy).attr('x2', plotW).attr('y2', cy)
+                    .attr('stroke', '#e53e3e').attr('stroke-width', 2.5).attr('stroke-dasharray', '6 3');
+                // Vertical
+                g.append('line').attr('x1', cx).attr('y1', 0).attr('x2', cx).attr('y2', plotH)
+                    .attr('stroke', 'white').attr('stroke-width', 4);
+                g.append('line').attr('x1', cx).attr('y1', 0).attr('x2', cx).attr('y2', plotH)
+                    .attr('stroke', '#e53e3e').attr('stroke-width', 2.5).attr('stroke-dasharray', '6 3');
             });
 
             // Axis labels
@@ -2703,8 +2721,8 @@
             annoG.append('text').attr('x', 24).attr('y', 10).attr('font-size', '10px').attr('fill', '#666')
                 .text('chosen level');
             annoG.append('rect').attr('x', 0).attr('y', 18).attr('width', 20).attr('height', 10)
-                .attr('fill', 'none').attr('stroke', '#444').attr('stroke-width', 1.5)
-                .attr('stroke-dasharray', '4 3');
+                .attr('fill', 'none').attr('stroke', '#f6ad55').attr('stroke-width', 2.5)
+                .attr('stroke-dasharray', '5 3');
             annoG.append('text').attr('x', 24).attr('y', 27).attr('font-size', '10px').attr('fill', '#666')
                 .text('stable region (NMI ≥ 0.9)');
         }
@@ -2741,7 +2759,8 @@
                 const bw = x.bandwidth();
                 g.append('rect').attr('x', bx - 2).attr('y', 0)
                     .attr('width', bw + 4).attr('height', plotH)
-                    .attr('fill', 'rgba(102,126,234,0.13)').attr('rx', 3);
+                    .attr('fill', 'rgba(246,173,85,0.22)')
+                    .attr('stroke', 'rgba(246,173,85,0.7)').attr('stroke-width', 1.5).attr('rx', 3);
             });
 
             // Zero baseline
