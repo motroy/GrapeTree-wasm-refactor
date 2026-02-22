@@ -8,7 +8,7 @@ class GrapeTreeWASM {
         this.pendingRequests = new Map();
         this.nextRequestId = 1;
     }
-
+    
     /**
      * Initialize the WASM module via Web Worker
      * @returns {Promise<GrapeTreeWASM>}
@@ -17,7 +17,7 @@ class GrapeTreeWASM {
         if (this.isInitialized) {
             return this;
         }
-
+        
         return new Promise((resolve, reject) => {
             try {
                 this.worker = new Worker('worker.js');
@@ -70,7 +70,7 @@ class GrapeTreeWASM {
             }
         });
     }
-
+    
     /**
      * Compute phylogenetic tree from profile data
      * @param {Object} options - Tree computation options
@@ -84,7 +84,7 @@ class GrapeTreeWASM {
      */
     async computeTree(options, onProgress) {
         this._checkInitialized();
-
+        
         const {
             data,
             method = 'MSTreeV2',
@@ -92,10 +92,10 @@ class GrapeTreeWASM {
             missing = 0,
             heuristic = 'harmonic'
         } = options;
-
+        
         // Validate inputs
         this._validateTreeOptions(data, method, matrix, missing, heuristic);
-
+        
         try {
             const resultJson = await this._sendRequest('compute_tree', {
                 data,
@@ -104,26 +104,26 @@ class GrapeTreeWASM {
                 missing,
                 heuristic
             }, onProgress);
-
+            
             const result = JSON.parse(resultJson);
-
+            
             if (!result.success) {
                 throw new Error(result.error || 'Tree computation failed');
             }
-
+            
             return {
                 newick: result.newick,
                 edges: result.edges,
                 nNodes: result.n_nodes,
                 nEdges: result.n_edges
             };
-
+            
         } catch (error) {
             console.error('Tree computation error:', error);
             throw error;
         }
     }
-
+    
     /**
      * Compute distance matrix only
      * @param {Object} data - Profile data
@@ -134,26 +134,26 @@ class GrapeTreeWASM {
      */
     async computeDistanceMatrix(data, matrixType = 'symmetric', missing = 0, onProgress) {
         this._checkInitialized();
-
+        
         try {
             const resultJson = await this._sendRequest('compute_distance_matrix', {
                 data,
                 matrixType,
                 missing
             }, onProgress);
-
+            
             const result = JSON.parse(resultJson);
-
+            
             if (!result.success) {
                 throw new Error(result.error || 'Distance computation failed');
             }
-
+            
             return {
                 matrix: result.matrix,
                 strainNames: result.strain_names,
                 nStrains: result.n_strains
             };
-
+            
         } catch (error) {
             console.error('Distance matrix computation error:', error);
             throw error instanceof Error ? error : new Error(String(error));
@@ -167,7 +167,7 @@ class GrapeTreeWASM {
             this.worker.postMessage({ type, id, data });
         });
     }
-
+    
     /**
      * Export tree to Newick format string
      * @param {Object} tree - Tree result from computeTree
@@ -176,7 +176,7 @@ class GrapeTreeWASM {
     exportNewick(tree) {
         return tree.newick;
     }
-
+    
     /**
      * Export distance matrix to PHYLIP format
      * @param {Object} matrixResult - Result from computeDistanceMatrix
@@ -185,54 +185,54 @@ class GrapeTreeWASM {
     exportPhylip(matrixResult) {
         const { matrix, strainNames } = matrixResult;
         const n = strainNames.length;
-
+        
         let output = `${n}\n`;
-
+        
         for (let i = 0; i < n; i++) {
             // PHYLIP format: name (10 chars) followed by distances
             const name = strainNames[i].padEnd(10).substring(0, 10);
             const distances = matrix[i].map(d => d.toFixed(6)).join(' ');
             output += `${name} ${distances}\n`;
         }
-
+        
         return output;
     }
-
+    
     // Private helper methods
-
+    
     _checkInitialized() {
         if (!this.isInitialized || !this.worker) {
             throw new Error('WASM worker not initialized. Call init() first.');
         }
     }
-
+    
     _validateTreeOptions(data, method, matrix, missing, heuristic) {
         if (!data || !data.strains || !data.profiles) {
             throw new Error('Invalid data format. Expected {strains: [], profiles: []}');
         }
-
+        
         if (data.strains.length === 0) {
             throw new Error('No strains provided');
         }
-
+        
         if (data.profiles.length !== data.strains.length) {
             throw new Error('Number of profiles must match number of strains');
         }
-
+        
         const validMethods = ['MSTree', 'MSTreeV2', 'NJ'];
         if (!validMethods.includes(method)) {
             throw new Error(`Invalid method: ${method}. Must be one of: ${validMethods.join(', ')}`);
         }
-
+        
         const validMatrix = ['symmetric', 'asymmetric'];
         if (!validMatrix.includes(matrix)) {
             throw new Error(`Invalid matrix type: ${matrix}. Must be one of: ${validMatrix.join(', ')}`);
         }
-
+        
         if (missing < 0 || missing > 3) {
             throw new Error('Missing data handler must be 0-3');
         }
-
+        
         const validHeuristics = ['eBurst', 'harmonic'];
         if (!validHeuristics.includes(heuristic)) {
             throw new Error(`Invalid heuristic: ${heuristic}. Must be one of: ${validHeuristics.join(', ')}`);

@@ -23,12 +23,15 @@ class MSTreeV2 {
 private:
     int n_nodes_;
     std::vector<double> distance_matrix_;
-    
-    // Private constructor for recursion
-    MSTreeV2(std::vector<double>&& distances, int n)
-        : n_nodes_(n), distance_matrix_(std::move(distances)) {}
 
 public:
+    // Preferred constructor: accepts an already-flat 1-D distance matrix
+    // (row-major, size n*n) and takes ownership via move.  No extra copy.
+    MSTreeV2(std::vector<double>&& flat_distances, int n)
+        : n_nodes_(n), distance_matrix_(std::move(flat_distances)) {}
+
+    // Convenience constructor from 2-D matrix (kept for compatibility).
+    // Prefer the flat constructor to avoid a redundant 84 MB allocation.
     explicit MSTreeV2(
         const std::vector<std::vector<double>>& distances
     ) : n_nodes_(distances.size()) {
@@ -37,7 +40,8 @@ public:
             distance_matrix_.insert(distance_matrix_.end(), row.begin(), row.end());
         }
     }
-    
+
+public:
     std::vector<Edge> compute(std::function<void(double)> progress_cb = nullptr) {
         if (progress_cb) progress_cb(0.0);
 
@@ -155,10 +159,18 @@ private:
     }
     
     int find_root(std::vector<int>& parent, int node) {
-        if (parent[node] != node) {
-            parent[node] = find_root(parent, parent[node]);
+        // Iterative path compression — avoids stack overflow on deep chains.
+        int root = node;
+        while (parent[root] != root) {
+            root = parent[root];
         }
-        return parent[node];
+        // Path compression: point every visited node directly at the root.
+        while (parent[node] != root) {
+            int next = parent[node];
+            parent[node] = root;
+            node = next;
+        }
+        return root;
     }
     
     void mark_cycle(
