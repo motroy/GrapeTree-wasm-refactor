@@ -39,8 +39,8 @@ class FileHandler {
     async parse(file) {
         const fileName = file.name.toLowerCase();
         const content = await this._readFile(file);
-
-        if (fileName.endsWith('.fasta') || fileName.endsWith('.fa') ||
+        
+        if (fileName.endsWith('.fasta') || fileName.endsWith('.fa') || 
             fileName.endsWith('.fna')) {
             return this._parseInWorker(content, fileName);
         } else if (fileName.endsWith('.json')) {
@@ -50,9 +50,9 @@ class FileHandler {
             return this._parseInWorker(content, fileName);
         }
     }
-
+    
     // parseProfile and parseFasta are now handled in worker.js
-
+    
     /**
      * Parse JSON format (GrapeTree session or pre-computed lineage)
      */
@@ -138,52 +138,52 @@ class FileHandler {
 
         return result;
     }
-
+    
     /**
      * Parse metadata file (tab or comma delimited)
      */
     parseMetadata(content) {
         const lines = content.trim().split('\n');
-
+        
         if (lines.length < 2) {
             throw new Error('Metadata file must have at least a header and one data line');
         }
-
+        
         const delimiter = this._detectDelimiter(lines[0]);
         const header = lines[0].split(delimiter).map(s => s.trim());
-
+        
         // Find ID column
-        let idColumnIndex = header.findIndex(h =>
+        let idColumnIndex = header.findIndex(h => 
             h.toLowerCase() === 'id' || h.toLowerCase() === 'strain'
         );
-
+        
         if (idColumnIndex === -1) {
             idColumnIndex = 0; // Use first column as ID
         }
-
+        
         const metadata = {};
         const fields = header.filter((_, i) => i !== idColumnIndex);
-
+        
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
-
+            
             const values = line.split(delimiter).map(s => s.trim());
             const id = values[idColumnIndex];
-
+            
             metadata[id] = {};
             fields.forEach((field, fieldIdx) => {
                 const valueIdx = fieldIdx < idColumnIndex ? fieldIdx : fieldIdx + 1;
                 metadata[id][field] = values[valueIdx] || '';
             });
         }
-
+        
         return {
             metadata,
             fields
         };
     }
-
+    
     /**
      * Parse a pHierCC hierarchical clustering file.
      * Accepts plain-text tab-delimited files or gzip-compressed (.gz) files.
@@ -281,25 +281,25 @@ class FileHandler {
     async _readFile(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
-
+            
             reader.onload = (e) => resolve(e.target.result);
             reader.onerror = (e) => reject(new Error('Failed to read file'));
-
+            
             reader.readAsText(file);
         });
     }
-
+    
     _detectDelimiter(line) {
         const tabCount = (line.match(/\t/g) || []).length;
         const commaCount = (line.match(/,/g) || []).length;
-
+        
         return tabCount > commaCount ? '\t' : ',';
     }
-
+    
     _extractFromSession(sessionData) {
         // Extract profile data from GrapeTree session JSON
         const strains = Object.keys(sessionData.metadata || {});
-
+        
         // This would need to reconstruct profiles from tree
         // For now, throw an error
         throw new Error(
@@ -314,18 +314,18 @@ FileHandler.validateProfileData = function(data) {
     if (!data || !data.strains || !data.profiles) {
         return { valid: false, error: 'Missing strains or profiles' };
     }
-
+    
     if (data.strains.length === 0) {
         return { valid: false, error: 'No strains provided' };
     }
-
+    
     if (data.strains.length !== data.profiles.length) {
-        return {
-            valid: false,
-            error: 'Number of strains and profiles must match'
+        return { 
+            valid: false, 
+            error: 'Number of strains and profiles must match' 
         };
     }
-
+    
     // Check all profiles have same length
     const profileLength = data.profiles[0].length;
     for (let i = 1; i < data.profiles.length; i++) {
@@ -336,7 +336,7 @@ FileHandler.validateProfileData = function(data) {
             };
         }
     }
-
+    
     return { valid: true };
 };
 

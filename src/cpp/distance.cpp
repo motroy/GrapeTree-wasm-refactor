@@ -96,6 +96,64 @@ public:
         return matrix;
     }
     
+    // Compute flat (1-D, row-major) asymmetric distance matrix.
+    // Avoids the intermediate 2-D allocation, halving peak memory vs
+    // compute_asymmetric() when the result is fed into MSTreeV2.
+    std::vector<double> compute_asymmetric_flat(
+        std::function<void(double)> progress_cb = nullptr
+    ) {
+        int n = data_.n_strains;
+        std::vector<double> matrix(static_cast<size_t>(n) * n, 0.0);
+
+        int report_frequency = std::max(1, n / 100);
+
+        for (int i = 0; i < n; ++i) {
+            if (progress_cb && i % report_frequency == 0) {
+                progress_cb(static_cast<double>(i) / n * 100.0);
+            }
+            for (int j = 0; j < n; ++j) {
+                if (i != j) {
+                    matrix[i * n + j] = compute_directional_distance(
+                        data_.profiles[i],
+                        data_.profiles[j]
+                    );
+                }
+            }
+        }
+
+        if (progress_cb) progress_cb(100.0);
+        return matrix;
+    }
+
+    // Compute flat (1-D, row-major) symmetric distance matrix.
+    std::vector<double> compute_symmetric_flat(
+        MissingHandler handler = IGNORE,
+        std::function<void(double)> progress_cb = nullptr
+    ) {
+        int n = data_.n_strains;
+        std::vector<double> matrix(static_cast<size_t>(n) * n, 0.0);
+
+        int report_frequency = std::max(1, n / 100);
+
+        for (int i = 0; i < n; ++i) {
+            if (progress_cb && i % report_frequency == 0) {
+                progress_cb(static_cast<double>(i) / n * 100.0);
+            }
+            for (int j = i + 1; j < n; ++j) {
+                double dist = compute_pairwise_distance(
+                    data_.profiles[i],
+                    data_.profiles[j],
+                    handler
+                );
+                matrix[i * n + j] = dist;
+                matrix[j * n + i] = dist;
+            }
+        }
+
+        if (progress_cb) progress_cb(100.0);
+        return matrix;
+    }
+
     // Compute p-distance for aligned sequences
     std::vector<std::vector<double>> compute_p_distance(
         const std::vector<std::string>& sequences,

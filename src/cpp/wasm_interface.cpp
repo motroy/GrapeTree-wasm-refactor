@@ -84,38 +84,49 @@ std::string compute_tree(
         
         // Compute distance matrix
         DistanceMatrix dm(profile_data);
-        std::vector<std::vector<double>> distances;
-        
+
         // Distance calculation takes roughly 90% of time for large N
         auto dist_progress = [](double p) {
             report_progress("Computing distance matrix", p * 0.9);
         };
 
-        if (matrix_type == "symmetric") {
-            distances = dm.compute_symmetric(
-                static_cast<DistanceMatrix::MissingHandler>(missing_handler),
-                dist_progress
-            );
-        } else {
-            distances = dm.compute_asymmetric(dist_progress);
-        }
-        
-        // Compute tree
-        std::vector<Edge> tree_edges;
-        
         // Tree construction takes remaining 10%
         auto tree_progress = [](double p) {
             report_progress("Building tree", 90.0 + p * 0.1);
         };
 
+        // Compute tree
+        std::vector<Edge> tree_edges;
+
         if (method == "MSTree") {
+            // MSTree holds a const-ref to the 2-D matrix, so we keep it alive
+            // for the duration of the call.  No extra copy is created.
+            auto distances = dm.compute_symmetric(
+                static_cast<DistanceMatrix::MissingHandler>(missing_handler),
+                dist_progress
+            );
             MSTree::Heuristic h = (heuristic == "harmonic") ?
                 MSTree::HARMONIC : MSTree::EBURST;
             MSTree mst(distances, h);
             tree_edges = mst.compute();
             tree_progress(100.0);
         } else if (method == "MSTreeV2") {
-            MSTreeV2 mst2(distances);
+            // Use the flat-matrix path: compute one contiguous 1-D vector and
+            // move it directly into MSTreeV2.  This avoids having both the 2-D
+            // matrix AND a flat copy alive simultaneously, cutting peak distance
+            // memory roughly in half (e.g. ~85 MB instead of ~170 MB for
+            // N=3 256 strains).
+            int n = profile_data.n_strains;
+            std::vector<double> flat_distances;
+            if (matrix_type == "symmetric") {
+                flat_distances = dm.compute_symmetric_flat(
+                    static_cast<DistanceMatrix::MissingHandler>(missing_handler),
+                    dist_progress
+                );
+            } else {
+                flat_distances = dm.compute_asymmetric_flat(dist_progress);
+            }
+            MSTreeV2 mst2(std::move(flat_distances), n);
             tree_edges = mst2.compute(tree_progress);
         } else {
             throw std::runtime_error("Unknown method: " + method);

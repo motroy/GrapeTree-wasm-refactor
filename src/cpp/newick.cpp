@@ -121,40 +121,59 @@ private:
         return best_root;
     }
     
+    // Iterative post-order Newick builder.
+    // Replaces the former recursive implementation to avoid stack overflow on
+    // deep linear trees (e.g. chains of 3 000+ nodes in large cgMLST profiles).
     std::string to_newick(
-        int node_id,
+        int root_id,
         const std::vector<TreeNode>& nodes,
         const std::vector<std::string>& names
     ) {
-        const TreeNode& node = nodes[node_id];
+        struct Frame {
+            int node_id;
+            size_t child_idx; // index of the next child yet to be written
+        };
+
         std::ostringstream oss;
         oss << std::fixed << std::setprecision(6);
-        
-        if (node.children.empty()) {
-            // Leaf node
-            oss << sanitize_name(names[node_id]);
-        } else {
-            // Internal node with children
-            oss << "(";
-            
-            for (size_t i = 0; i < node.children.size(); ++i) {
-                if (i > 0) oss << ",";
-                
-                int child_id = node.children[i];
-                oss << to_newick(child_id, nodes, names);
-                
-                // Add branch length
-                oss << ":" << nodes[child_id].branch_length;
+
+        std::vector<Frame> stk;
+        stk.push_back({root_id, 0});
+
+        while (!stk.empty()) {
+            Frame& top = stk.back();
+            int nid = top.node_id;
+            const TreeNode& node = nodes[nid];
+
+            if (top.child_idx == 0 && !node.children.empty()) {
+                // First visit to an internal node — open the subtree bracket.
+                oss << "(";
             }
-            
-            oss << ")";
-            
-            // Add internal node label if desired
-            if (node_id < static_cast<int>(names.size())) {
-                oss << sanitize_name(names[node_id]);
+
+            if (top.child_idx < node.children.size()) {
+                // Still have children to recurse into.
+                if (top.child_idx > 0) oss << ",";
+                int child_id = node.children[top.child_idx];
+                ++top.child_idx;
+                stk.push_back({child_id, 0});
+            } else {
+                // All children have been written — close this node.
+                stk.pop_back();
+
+                if (!node.children.empty()) oss << ")";
+
+                // Node label (leaf or internal).
+                if (nid < static_cast<int>(names.size())) {
+                    oss << sanitize_name(names[nid]);
+                }
+
+                // Branch length — appended after returning to parent.
+                if (!stk.empty()) {
+                    oss << ":" << node.branch_length;
+                }
             }
         }
-        
+
         return oss.str();
     }
     
