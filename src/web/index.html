@@ -1330,7 +1330,11 @@
                 `${matched} strains matched` +
                 (unmatched > 0 ? `, ${unmatched} unmatched` : '');
 
-            if (currentTree) displayTree(currentTree);
+            if (currentView === 'heatmap' && currentMatrix) {
+                displayHeatmap(currentMatrix);
+            } else if (currentTree) {
+                displayTree(currentTree);
+            }
         }
 
         // Color selection handlers
@@ -2011,7 +2015,14 @@
                 .attr('r', nodeRadius)
                 .attr('fill', d => {
                     const v = nodeClusterValue(d);
-                    return (v && colorMapping[v]) ? colorMapping[v] : '#ccc';
+                    if (v && colorMapping[v]) return colorMapping[v];
+                    // When cluster shading is active, colour nodes by their cluster
+                    // so they match the hull even if no explicit "Color by" column is set.
+                    if (showShading) {
+                        const hv = nodeHullClusterValue(d);
+                        if (hv && hullColorMapping[hv]) return hullColorMapping[hv];
+                    }
+                    return '#ccc';
                 })
                 .attr('stroke', '#fff')
                 .attr('stroke-width', 1.5)
@@ -2358,8 +2369,39 @@
             const matrix = matrixData.matrix;
             const n = strainNames.length;
 
+            // --- Cluster data (if an HC level is selected) ---
+            const hcSelectedLevel = hcLevelSelect ? hcLevelSelect.value : '';
+            const clusterColumn = (hcSelectedLevel && currentHierCC) ? `HierCC_${hcSelectedLevel}` : null;
+            const strainCluster = {}; // strain name → cluster value
+            let clusterColorMap = {};  // cluster value → color
+            const CLUSTER_BAR = 10;   // px width of the colour strip
+
+            if (clusterColumn && currentMetadata) {
+                const clusterValues = new Set();
+                strainNames.forEach(name => {
+                    const val = currentMetadata[name] && currentMetadata[name][clusterColumn];
+                    if (val && val !== 'Unknown') {
+                        strainCluster[name] = val;
+                        clusterValues.add(val);
+                    }
+                });
+                const palette = d3.scaleOrdinal(getColorScheme());
+                Array.from(clusterValues).sort().forEach((v, i) => {
+                    clusterColorMap[v] = palette(i);
+                });
+            }
+            const hasCluster = Object.keys(clusterColorMap).length > 0;
+
             // Calculate dimensions
-            const margin = { top: 150, right: 50, bottom: 50, left: 150 };
+            const clusterBarSpace = hasCluster ? CLUSTER_BAR + 3 : 0; // extra margin for colour strip
+            const clusterLegRows  = hasCluster ? Math.ceil(Math.min(Object.keys(clusterColorMap).length, 40) / 8) : 0;
+            const clusterLegH     = hasCluster ? clusterLegRows * 16 + 30 : 0;
+            const margin = {
+                top: 150 + clusterBarSpace,
+                right: 50,
+                bottom: 50 + clusterLegH,
+                left: 150 + clusterBarSpace
+            };
             const cellSize = Math.min(30, Math.max(10, (600 - margin.left - margin.right) / n));
             const width = n * cellSize + margin.left + margin.right;
             const height = n * cellSize + margin.top + margin.bottom;
@@ -2435,16 +2477,116 @@
                     .text(d => d.value > 0 ? d.value.toFixed(1) : '');
             }
 
+            // --- Cluster colour strips (drawn between cell grid and labels) ---
+            if (hasCluster) {
+                // Row strip (left of grid)
+                g.selectAll('rect.row-cluster-bar')
+                    .data(strainNames)
+                    .join('rect')
+                    .attr('class', 'row-cluster-bar')
+                    .attr('x', -(clusterBarSpace))
+                    .attr('y', (d, i) => i * cellSize)
+                    .attr('width', CLUSTER_BAR)
+                    .attr('height', cellSize)
+                    .attr('fill', d => clusterColorMap[strainCluster[d]] || '#e0e0e0')
+                    .attr('stroke', 'none')
+                    .append('title').text(d => strainCluster[d] ? `${hcSelectedLevel}: ${strainCluster[d]}` : 'Unknown');
+
+                // Column strip (above grid)
+                g.selectAll('rect.col-cluster-bar')
+                    .data(strainNames)
+                    .join('rect')
+                    .attr('class', 'col-cluster-bar')
+                    .attr('x', (d, i) => i * cellSize)
+                    .attr('y', -(clusterBarSpace))
+                    .attr('width', cellSize)
+                    .attr('height', CLUSTER_BAR)
+                    .attr('fill', d => clusterColorMap[strainCluster[d]] || '#e0e0e0')
+                    .attr('stroke', 'none')
+                    .append('title').text(d => strainCluster[d] ? `${hcSelectedLevel}: ${strainCluster[d]}` : 'Unknown');
+
+                // Draw cluster-group borders on the main grid
+                // Find contiguous runs of the same cluster value along the strain order
+                const clusterRuns = [];
+                let runStart = 0;
+                for (let i = 1; i <= n; i++) {
+                    if (i === n || strainCluster[strainNames[i]] !== strainCluster[strainNames[runStart]]) {
+                        clusterRuns.push({ start: runStart, end: i - 1, value: strainCluster[strainNames[runStart]] });
+                        runStart = i;
+                    }
+                }
+                clusterRuns.forEach(run => {
+                    if (!run.value) return;
+                    const x0 = run.start * cellSize;
+                    const y0 = run.start * cellSize;
+                    const w  = (run.end - run.start + 1) * cellSize;
+                    const col = clusterColorMap[run.value];
+                    // Diagonal block border
+                    g.append('rect')
+                        .attr('x', x0).attr('y', y0)
+                        .attr('width', w).attr('height', w)
+                        .attr('fill', 'none')
+                        .attr('stroke', col)
+                        .attr('stroke-width', 1.5)
+                        .attr('stroke-opacity', 0.7)
+                        .style('pointer-events', 'none');
+                });
+
+                // Cluster colour legend (bottom-left of SVG)
+                const clusterEntries = Object.entries(clusterColorMap).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+                const LEG_SWATCH = 12;
+                const LEG_GAP    = 4;
+                const LEG_ROW    = LEG_SWATCH + LEG_GAP;
+                const legX = margin.left;
+                const legY = margin.top + n * cellSize + 14;
+
+                // Render up to 40 entries to avoid overflows for huge data sets
+                const maxEntries = 40;
+                const visibleEntries = clusterEntries.slice(0, maxEntries);
+
+                const legG = svg.append('g').attr('transform', `translate(${legX},${legY})`);
+                legG.append('text')
+                    .attr('x', 0).attr('y', -4)
+                    .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#555')
+                    .text(hcSelectedLevel + ' clusters');
+
+                // Arrange in rows of up to 8 items
+                const COLS = 8;
+                visibleEntries.forEach(([val, col], idx) => {
+                    const colIdx = idx % COLS;
+                    const rowIdx = Math.floor(idx / COLS);
+                    const itemW  = 90;
+                    const gx = colIdx * itemW;
+                    const gy = rowIdx * LEG_ROW;
+                    legG.append('rect')
+                        .attr('x', gx).attr('y', gy)
+                        .attr('width', LEG_SWATCH).attr('height', LEG_SWATCH)
+                        .attr('fill', col).attr('rx', 2);
+                    legG.append('text')
+                        .attr('x', gx + LEG_SWATCH + 4).attr('y', gy + LEG_SWATCH - 2)
+                        .attr('font-size', '10px').attr('fill', '#444')
+                        .text(val.length > 8 ? val.slice(0, 7) + '…' : val);
+                });
+                if (clusterEntries.length > maxEntries) {
+                    const rowIdx = Math.floor(maxEntries / COLS);
+                    legG.append('text')
+                        .attr('x', 0).attr('y', rowIdx * LEG_ROW + LEG_SWATCH)
+                        .attr('font-size', '10px').attr('fill', '#999')
+                        .text(`… and ${clusterEntries.length - maxEntries} more`);
+                }
+            }
+
             // Add row labels
             g.selectAll('text.row-label')
                 .data(strainNames)
                 .join('text')
                 .attr('class', 'row-label')
-                .attr('x', -5)
+                .attr('x', hasCluster ? -(clusterBarSpace + 4) : -5)
                 .attr('y', (d, i) => i * cellSize + cellSize / 2)
                 .attr('text-anchor', 'end')
                 .attr('dominant-baseline', 'middle')
                 .attr('font-size', Math.min(12, cellSize * 0.8) + 'px')
+                .attr('fill', d => (hasCluster && strainCluster[d]) ? clusterColorMap[strainCluster[d]] : '#333')
                 .text(d => d);
 
             // Add column labels
@@ -2453,11 +2595,15 @@
                 .join('text')
                 .attr('class', 'col-label')
                 .attr('x', (d, i) => i * cellSize + cellSize / 2)
-                .attr('y', -5)
+                .attr('y', hasCluster ? -(clusterBarSpace + 4) : -5)
                 .attr('text-anchor', 'start')
                 .attr('dominant-baseline', 'middle')
                 .attr('font-size', Math.min(12, cellSize * 0.8) + 'px')
-                .attr('transform', (d, i) => `rotate(-45, ${i * cellSize + cellSize / 2}, -5)`)
+                .attr('fill', d => (hasCluster && strainCluster[d]) ? clusterColorMap[strainCluster[d]] : '#333')
+                .attr('transform', (d, i) => {
+                    const yPos = hasCluster ? -(clusterBarSpace + 4) : -5;
+                    return `rotate(-45, ${i * cellSize + cellSize / 2}, ${yPos})`;
+                })
                 .text(d => d);
 
             // Add color scale legend
@@ -2862,10 +3008,15 @@
                         showError('Load a data file and compute the tree first');
                         return;
                     }
+                    if (currentData.type === 'precomputed') {
+                        hideProgress();
+                        showError('Silhouette scores require allele profiles — load a profile or FASTA file instead of a pre-computed tree.');
+                        return;
+                    }
                     silStatus.textContent = 'Computing distance matrix…';
                     const matrixType = document.getElementById('matrix-select').value;
                     const missing    = parseInt(document.getElementById('missing-select').value);
-                    currentMatrix = grapetree.computeDistanceMatrix(currentData, matrixType, missing);
+                    currentMatrix = await grapetree.computeDistanceMatrix(currentData, matrixType, missing);
                 }
 
                 silStatus.textContent = 'Computing silhouette scores…';
