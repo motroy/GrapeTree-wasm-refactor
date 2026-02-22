@@ -29,7 +29,7 @@ public:
     
 private:
     int n_nodes_;
-    std::vector<std::vector<double>> distance_matrix_;
+    const std::vector<std::vector<double>>& distance_matrix_;
     Heuristic heuristic_;
     
 public:

@@ -5,6 +5,7 @@ CXX = em++
 CXXFLAGS = -std=c++17 -O3 \
            -s WASM=1 \
            -s ALLOW_MEMORY_GROWTH=1 \
+           -s STACK_SIZE=5MB \
            -s MODULARIZE=1 \
            -s EXPORT_NAME='GrapeTreeWASMModule' \
            -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap"]' \
