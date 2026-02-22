@@ -485,6 +485,134 @@
             font-style: italic;
             padding: 1rem 0;
         }
+
+        /* ====== TAB NAVIGATION ====== */
+        .tab-nav {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid #e0e0e0;
+            margin: -1.5rem -1.5rem 1.25rem;
+            padding: 0 1.5rem;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .tab-nav::-webkit-scrollbar { display: none; }
+
+        .tab-btn {
+            position: relative;
+            padding: 0.65rem 1.1rem;
+            border: none;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            background: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #999;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+            white-space: nowrap;
+            border-radius: 0;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        .tab-btn:hover { color: #667eea; }
+        .tab-btn.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+        /* Badge on tab */
+        .tab-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #38a169;
+            color: white;
+            border-radius: 10px;
+            font-size: 0.6rem;
+            font-weight: 700;
+            min-width: 15px;
+            height: 15px;
+            padding: 0 3px;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+        /* File loaded badge */
+        .file-loaded-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            margin-top: 0.4rem;
+            padding: 0.35rem 0.65rem;
+            background: #f0f9f0;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            font-size: 0.78rem;
+            color: #276749;
+        }
+
+        /* Optional tag */
+        .optional-tag {
+            font-size: 0.68rem;
+            font-weight: 500;
+            color: #aaa;
+            background: #f0f0f0;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+
+        /* Workflow hint inside tab */
+        .tab-hint {
+            margin-top: 1.25rem;
+            padding: 0.55rem 0.85rem;
+            background: #f0f4ff;
+            border-left: 3px solid #667eea;
+            border-radius: 0 4px 4px 0;
+            font-size: 0.82rem;
+            color: #555;
+        }
+
+        /* Export tab sections */
+        .export-group { margin-bottom: 1.5rem; }
+        .export-group:last-child { margin-bottom: 0; }
+        .export-group-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #999;
+            margin-bottom: 0.65rem;
+        }
+
+        /* Clusters tab placeholder */
+        .no-clusters-placeholder {
+            padding: 1.5rem;
+            background: #f8f9fa;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 0.88rem;
+            color: #777;
+            line-height: 1.6;
+        }
+
+        /* Viz toolbar row (status + optional action) */
+        .viz-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .viz-toolbar .status-bar {
+            margin-bottom: 0;
+            flex: 1;
+        }
     </style>
 </head>
 <body>
@@ -495,151 +623,211 @@
     
     <div class="container">
         <div class="controls-panel">
-            <h2 style="margin-bottom: 1.5rem;">Tree Configuration</h2>
-            
+            <!-- Tab navigation -->
+            <nav class="tab-nav" id="tab-nav" role="tablist">
+                <button class="tab-btn active" data-tab="data" role="tab">
+                    Data <span class="tab-badge" id="badge-data" style="display:none">✓</span>
+                </button>
+                <button class="tab-btn" data-tab="compute" role="tab">Compute</button>
+                <button class="tab-btn" data-tab="style" role="tab">Style</button>
+                <button class="tab-btn" data-tab="clusters" role="tab">
+                    Clusters <span class="tab-badge" id="badge-clusters" style="display:none">✓</span>
+                </button>
+                <button class="tab-btn" data-tab="export" role="tab">Export</button>
+            </nav>
+
+            <!-- Shared: error message and progress bar (always visible) -->
             <div class="error-message" id="error-message"></div>
-            
             <div class="progress-bar" id="progress-bar">
                 <div class="progress-fill"></div>
             </div>
-            
-            <div class="control-group">
-                <label for="file-input">Upload Data File</label>
-                <input type="file" id="file-input" accept=".txt,.csv,.tsv,.fasta,.fa,.json">
-                <small style="color: #999; margin-top: 0.5rem; display: block;">
-                    Supported: MLST/cgMLST profiles (.txt, .csv), aligned FASTA (.fasta), or JSON
-                </small>
-            </div>
 
-            <div class="control-group">
-                <label for="metadata-input">Upload Metadata (Optional)</label>
-                <input type="file" id="metadata-input" accept=".txt,.csv,.tsv">
-                <small style="color: #999; margin-top: 0.5rem; display: block;">
-                    Supported: Tab or comma delimited files with ID column
-                </small>
-            </div>
-
-            <div class="control-group">
-                <label for="hiercc-input">Upload pHierCC Clusters (Optional)</label>
-                <input type="file" id="hiercc-input" accept=".txt,.tsv,.gz">
-                <small style="color: #999; margin-top: 0.5rem; display: block;">
-                    HC clusters are <strong>computed automatically</strong> from the MST after tree computation.
-                    Upload a <a href="https://github.com/zheminzhou/pHierCC" target="_blank" rel="noopener noreferrer" style="color:#667eea;">pHierCC</a>
-                    output file (.HierCC.gz or tab-delimited) only if you need external cluster assignments.
-                </small>
-            </div>
-
-            <!-- HC level selector — shown after pHierCC file upload OR tree computation -->
-            <div class="hiercc-panel" id="hiercc-panel" style="display:none;">
-                <label>pHierCC Cluster Level
-                    <span id="hiercc-source-badge"
-                          style="font-weight:400;font-size:0.75rem;color:#888;margin-left:0.5rem;"></span>
-                </label>
-                <div class="hc-slider-row">
-                    <select id="hc-level-select" title="Select hierarchical clustering level">
-                        <option value="">Select HC level…</option>
-                    </select>
+            <!-- Tab: Data -->
+            <div class="tab-pane active" id="tab-data" role="tabpanel">
+                <div class="control-group">
+                    <label for="file-input">Data File</label>
+                    <input type="file" id="file-input" accept=".txt,.csv,.tsv,.fasta,.fa,.json">
+                    <small style="color:#999;margin-top:0.4rem;display:block;">
+                        MLST/cgMLST profiles (.txt, .csv, .tsv), aligned FASTA (.fasta, .fa), or GrapeTree JSON
+                    </small>
+                    <div class="file-loaded-badge" id="data-file-badge" style="display:none;">
+                        <span>✓</span><span id="data-file-name"></span>
+                    </div>
                 </div>
-                <div class="hc-stats" id="hc-stats"></div>
-                <div class="hiercc-actions">
-                    <button class="btn-secondary" id="download-hiercc-btn" style="display:none; padding: 0.35rem 0.8rem; font-size: 0.85rem;">
-                        Download HierCC TSV
-                    </button>
-                    <label class="hiercc-shade-label">
-                        <input type="checkbox" id="shade-clusters-check">
-                        Shade cluster regions
+                <div class="control-group">
+                    <label for="metadata-input">
+                        Metadata <span class="optional-tag">optional</span>
                     </label>
+                    <input type="file" id="metadata-input" accept=".txt,.csv,.tsv">
+                    <small style="color:#999;margin-top:0.4rem;display:block;">
+                        Tab or comma delimited with an ID column matching your strain names
+                    </small>
+                    <div class="file-loaded-badge" id="metadata-file-badge" style="display:none;">
+                        <span>✓</span><span id="metadata-file-name"></span>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="hiercc-input">
+                        pHierCC Clusters <span class="optional-tag">optional</span>
+                    </label>
+                    <input type="file" id="hiercc-input" accept=".txt,.tsv,.gz">
+                    <small style="color:#999;margin-top:0.4rem;display:block;">
+                        Clusters are <strong>computed automatically</strong> after tree computation.
+                        Upload a <a href="https://github.com/zheminzhou/pHierCC" target="_blank" rel="noopener noreferrer" style="color:#667eea;">pHierCC</a>
+                        output file (.HierCC.gz or tab-delimited) only if you need external cluster assignments.
+                    </small>
+                    <div class="file-loaded-badge" id="hiercc-file-badge" style="display:none;">
+                        <span>✓</span><span id="hiercc-file-name"></span>
+                    </div>
+                </div>
+                <div class="tab-hint">
+                    After uploading a data file, go to the <strong>Compute</strong> tab to build your tree.
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                <div class="control-group">
-                    <label for="method-select">Tree Method</label>
-                    <select id="method-select">
-                        <option value="MSTreeV2" selected>MSTreeV2 (Recommended)</option>
-                        <option value="MSTree">MSTree (Classical)</option>
-                    </select>
+            <!-- Tab: Compute -->
+            <div class="tab-pane" id="tab-compute" role="tabpanel">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;">
+                    <div class="control-group">
+                        <label for="method-select">Tree Method</label>
+                        <select id="method-select">
+                            <option value="MSTreeV2" selected>MSTreeV2 (Recommended)</option>
+                            <option value="MSTree">MSTree (Classical)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="matrix-select">Matrix Type</label>
+                        <select id="matrix-select">
+                            <option value="asymmetric" selected>Asymmetric</option>
+                            <option value="symmetric">Symmetric</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="missing-select">Missing Data</label>
+                        <select id="missing-select">
+                            <option value="0" selected>Ignore</option>
+                            <option value="1">Remove Column</option>
+                            <option value="2">Treat as Allele</option>
+                            <option value="3">Absolute Difference</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="heuristic-select">Tiebreak Heuristic</label>
+                        <select id="heuristic-select">
+                            <option value="harmonic" selected>Harmonic Mean</option>
+                            <option value="eBurst">eBurst</option>
+                        </select>
+                    </div>
                 </div>
-                
-                <div class="control-group">
-                    <label for="matrix-select">Matrix Type</label>
-                    <select id="matrix-select">
-                        <option value="asymmetric" selected>Asymmetric</option>
-                        <option value="symmetric">Symmetric</option>
-                    </select>
+                <div class="button-group" style="margin-top:1.5rem;">
+                    <button class="btn-primary" id="compute-btn">Compute Tree</button>
+                    <button class="btn-primary" id="compute-matrix-btn">Compute Distance Matrix</button>
                 </div>
-                
-                <div class="control-group">
-                    <label for="missing-select">Missing Data</label>
-                    <select id="missing-select">
-                        <option value="0" selected>Ignore</option>
-                        <option value="1">Remove Column</option>
-                        <option value="2">Treat as Allele</option>
-                        <option value="3">Absolute Difference</option>
-                    </select>
-                </div>
-                
-                <div class="control-group">
-                    <label for="heuristic-select">Tiebreak Heuristic</label>
-                    <select id="heuristic-select">
-                        <option value="harmonic" selected>Harmonic Mean</option>
-                        <option value="eBurst">eBurst</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <label for="color-select">Fill Color By</label>
-                    <select id="color-select" disabled>
-                        <option value="">None (Default)</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <label for="ring-color-select">Ring Color By</label>
-                    <select id="ring-color-select" disabled>
-                        <option value="">None</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <label for="color-scheme-select">Color Scheme</label>
-                    <select id="color-scheme-select">
-                        <option value="schemeTableau10" selected>Tableau 10</option>
-                        <option value="schemeCategory10">Category 10</option>
-                        <option value="schemeSet1">Set 1 (9 colors)</option>
-                        <option value="schemeSet2">Set 2 (8 colors)</option>
-                        <option value="schemeSet3">Set 3 (12 colors)</option>
-                        <option value="schemePastel1">Pastel</option>
-                        <option value="schemeDark2">Dark</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <label for="edge-scale-select">Edge Distance Scale</label>
-                    <select id="edge-scale-select">
-                        <option value="linear" selected>Linear</option>
-                        <option value="log">Logarithmic</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <label for="label-select">Label Nodes By</label>
-                    <select id="label-select">
-                        <option value="name" selected>Strain Name</option>
-                        <option value="">None</option>
-                    </select>
+                <div class="tab-hint">
+                    Load a data file in the <strong>Data</strong> tab first, then click <em>Compute Tree</em>.
                 </div>
             </div>
-            
-            <div class="button-group" style="margin-top: 1.5rem;">
-                <button class="btn-primary" id="compute-btn">Compute Tree</button>
-                <button class="btn-primary" id="compute-matrix-btn">Compute Distance Matrix</button>
-                <button class="btn-secondary" id="toggle-view-btn" style="display: none;">Toggle View</button>
-                <button class="btn-secondary" id="download-newick-btn">Download Newick</button>
-                <button class="btn-secondary" id="download-json-btn">Download GrapeTree JSON</button>
-                <button class="btn-secondary" id="download-svg-btn">Download SVG</button>
-                <button class="btn-secondary" id="download-matrix-tsv-btn" style="display: none;">Download Matrix (TSV)</button>
-                <button class="btn-secondary" id="download-heatmap-png-btn" style="display: none;">Download Heatmap (PNG)</button>
+
+            <!-- Tab: Style -->
+            <div class="tab-pane" id="tab-style" role="tabpanel">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;">
+                    <div class="control-group">
+                        <label for="color-select">Fill Color By</label>
+                        <select id="color-select" disabled>
+                            <option value="">None (Default)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="ring-color-select">Ring Color By</label>
+                        <select id="ring-color-select" disabled>
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="color-scheme-select">Color Scheme</label>
+                        <select id="color-scheme-select">
+                            <option value="schemeTableau10" selected>Tableau 10</option>
+                            <option value="schemeCategory10">Category 10</option>
+                            <option value="schemeSet1">Set 1 (9 colors)</option>
+                            <option value="schemeSet2">Set 2 (8 colors)</option>
+                            <option value="schemeSet3">Set 3 (12 colors)</option>
+                            <option value="schemePastel1">Pastel</option>
+                            <option value="schemeDark2">Dark</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="edge-scale-select">Edge Distance Scale</label>
+                        <select id="edge-scale-select">
+                            <option value="linear" selected>Linear</option>
+                            <option value="log">Logarithmic</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="label-select">Label Nodes By</label>
+                        <select id="label-select">
+                            <option value="name" selected>Strain Name</option>
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="tab-hint">
+                    Load metadata in the <strong>Data</strong> tab to enable <em>Fill Color By</em> and <em>Ring Color By</em>.
+                </div>
+            </div>
+
+            <!-- Tab: Clusters -->
+            <div class="tab-pane" id="tab-clusters" role="tabpanel">
+                <div class="no-clusters-placeholder" id="no-clusters-placeholder">
+                    <p>Cluster assignments will appear here after computing a tree.</p>
+                    <p style="margin-top:0.5rem;font-size:0.82rem;color:#aaa;">
+                        You can also upload a pHierCC file in the <strong>Data</strong> tab.
+                    </p>
+                </div>
+                <!-- HC level selector — shown after pHierCC file upload OR tree computation -->
+                <div class="hiercc-panel" id="hiercc-panel" style="display:none;">
+                    <label>pHierCC Cluster Level
+                        <span id="hiercc-source-badge"
+                              style="font-weight:400;font-size:0.75rem;color:#888;margin-left:0.5rem;"></span>
+                    </label>
+                    <div class="hc-slider-row">
+                        <select id="hc-level-select" title="Select hierarchical clustering level">
+                            <option value="">Select HC level…</option>
+                        </select>
+                    </div>
+                    <div class="hc-stats" id="hc-stats"></div>
+                    <div class="hiercc-actions">
+                        <button class="btn-secondary" id="download-hiercc-btn" style="display:none;padding:0.35rem 0.8rem;font-size:0.85rem;">
+                            Download HierCC TSV
+                        </button>
+                        <label class="hiercc-shade-label">
+                            <input type="checkbox" id="shade-clusters-check">
+                            Shade cluster regions
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Export -->
+            <div class="tab-pane" id="tab-export" role="tabpanel">
+                <div class="export-group">
+                    <div class="export-group-title">Tree</div>
+                    <div class="button-group">
+                        <button class="btn-secondary" id="download-newick-btn">Download Newick</button>
+                        <button class="btn-secondary" id="download-json-btn">Download JSON</button>
+                        <button class="btn-secondary" id="download-svg-btn">Download SVG</button>
+                    </div>
+                </div>
+                <div class="export-group" id="matrix-export-group" style="display:none;">
+                    <div class="export-group-title">Distance Matrix</div>
+                    <div class="button-group">
+                        <button class="btn-secondary" id="toggle-view-btn">Show Heatmap</button>
+                        <button class="btn-secondary" id="download-matrix-tsv-btn">Download Matrix (TSV)</button>
+                        <button class="btn-secondary" id="download-heatmap-png-btn">Download Heatmap (PNG)</button>
+                    </div>
+                </div>
+                <div class="tab-hint">
+                    Build a tree or distance matrix in the <strong>Compute</strong> tab to enable exports.
+                </div>
             </div>
         </div>
         
@@ -753,7 +941,41 @@
         const errorMessage = document.getElementById('error-message');
         const progressBar = document.getElementById('progress-bar');
         const treeInfo = document.getElementById('tree-info');
-        
+
+        // ---- Tab switching ----
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabId);
+            });
+            document.querySelectorAll('.tab-pane').forEach(pane => {
+                pane.classList.toggle('active', pane.id === 'tab-' + tabId);
+            });
+        }
+
+        function setTabBadge(tabId, text) {
+            const badge = document.getElementById('badge-' + tabId);
+            if (!badge) return;
+            if (text) {
+                badge.textContent = text;
+                badge.style.display = 'inline-flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+        });
+
+        // Helper: update file-loaded badge in the Data tab
+        function showFileBadge(badgeId, nameId, fileName) {
+            const badge = document.getElementById(badgeId);
+            const nameEl = document.getElementById(nameId);
+            if (badge) badge.style.display = 'inline-flex';
+            if (nameEl) nameEl.textContent = fileName;
+            setTabBadge('data', '✓');
+        }
+
         // Helper: populate both fill-color and ring-color dropdowns from a fields array
         function populateMetadataSelects(fields) {
             colorSelect.innerHTML = '<option value="">None (Default)</option>';
@@ -845,7 +1067,10 @@
                         `Loaded ${currentData.strains.length} strains with ` +
                         `${currentData.profiles[0].length} loci`;
                     computeBtn.disabled = false;
+                    // Prompt user to go to Compute tab
+                    switchTab('compute');
                 }
+                showFileBadge('data-file-badge', 'data-file-name', file.name);
             } catch (error) {
                 showError('Failed to parse file: ' + error.message);
             }
@@ -868,6 +1093,7 @@
                 customRingColors = {};
 
                 statusInfo.textContent = `Loaded metadata for ${Object.keys(currentMetadata).length} strains`;
+                showFileBadge('metadata-file-badge', 'metadata-file-name', file.name);
 
                 // Re-render if tree exists
                 if (currentTree) {
@@ -892,6 +1118,7 @@
                 const nStrains = Object.keys(currentHierCC.clusterData).length;
                 statusInfo.textContent =
                     `Loaded pHierCC file: ${nStrains} strains × ${currentHierCC.hcLevels.length} HC levels`;
+                showFileBadge('hiercc-file-badge', 'hiercc-file-name', file.name);
 
                 _populateHierCCPanel(null);
 
@@ -967,6 +1194,10 @@
 
             hierccPanel.style.display = 'block';
             downloadHierccBtn.style.display = 'inline-block';
+            // Hide the placeholder and show the badge on the Clusters tab
+            const noMsg = document.getElementById('no-clusters-placeholder');
+            if (noMsg) noMsg.style.display = 'none';
+            setTabBadge('clusters', '✓');
 
             const badge = document.getElementById('hiercc-source-badge');
             if (badge) {
@@ -1257,10 +1488,10 @@
                 statusInfo.textContent =
                     `Distance matrix computed in ${duration}s - ${currentMatrix.nStrains}x${currentMatrix.nStrains} matrix`;
 
-                // Show download and view buttons
-                downloadMatrixTsvBtn.style.display = 'inline-block';
-                downloadHeatmapPngBtn.style.display = 'inline-block';
-                toggleViewBtn.style.display = 'inline-block';
+                // Show distance matrix export section in Export tab
+                const matrixExportGroup = document.getElementById('matrix-export-group');
+                if (matrixExportGroup) matrixExportGroup.style.display = 'block';
+                toggleViewBtn.textContent = 'Show Tree';
 
                 // Display heatmap
                 currentView = 'heatmap';
