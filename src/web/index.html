@@ -1986,14 +1986,6 @@
                 .join('circle')
                 .attr('r', nodeRadius)
                 .attr('fill', d => {
-                    // When cluster shading is active, color nodes by the selected pHierCC
-                    // level so that every cluster member matches its hull color.
-                    // Without this, nodes whose "Fill Color By" column has no value render
-                    // as grey (#ccc) even though they belong to a shaded cluster.
-                    if (showShading && hullClusterColumn) {
-                        const hv = nodeHullClusterValue(d);
-                        return (hv && hullColorMapping[hv]) ? hullColorMapping[hv] : '#ccc';
-                    }
                     const v = nodeClusterValue(d);
                     return (v && colorMapping[v]) ? colorMapping[v] : '#ccc';
                 })
