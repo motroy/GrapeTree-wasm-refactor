@@ -12,6 +12,7 @@
 #include <queue>
 #include <map>
 #include <utility>
+#include <functional>
 
 namespace grapetree {
 
@@ -29,31 +30,48 @@ public:
     ) : distance_matrix_(distances),
         n_nodes_(distances.size()) {}
     
-    std::vector<Edge> compute() {
+    std::vector<Edge> compute(std::function<void(double)> progress_cb = nullptr) {
+        if (progress_cb) progress_cb(0.0);
+
         // Phase 1: Find minimum incoming edge for each node
-        std::vector<Edge> min_incoming = find_minimum_incoming_edges();
+        std::vector<Edge> min_incoming = find_minimum_incoming_edges(progress_cb);
         
+        if (progress_cb) progress_cb(50.0);
+
         // Phase 2: Detect cycles
         std::vector<int> cycle_id = detect_cycles(min_incoming);
         
+        if (progress_cb) progress_cb(60.0);
+
         // Phase 3: Contract cycles if present
         if (has_cycles(cycle_id)) {
             min_incoming = contract_and_solve(min_incoming, cycle_id);
         }
         
+        if (progress_cb) progress_cb(80.0);
+
         // Phase 4: Local branch recrafting optimization
         recraft_branches(min_incoming);
         
+        if (progress_cb) progress_cb(100.0);
+
         return min_incoming;
     }
     
 private:
     // Find minimum incoming edge for each node using harmonic mean tiebreak
-    std::vector<Edge> find_minimum_incoming_edges() {
+    std::vector<Edge> find_minimum_incoming_edges(std::function<void(double)> progress_cb = nullptr) {
         std::vector<Edge> edges;
         
+        int report_frequency = std::max(1, n_nodes_ / 100);
+
         // Node 0 is the root (no incoming edge)
         for (int to = 1; to < n_nodes_; ++to) {
+            if (progress_cb && to % report_frequency == 0) {
+                 // Map 0-100% of this phase to 0-50% of total
+                 progress_cb(static_cast<double>(to) / n_nodes_ * 50.0);
+            }
+
             double min_dist = std::numeric_limits<double>::max();
             int best_from = -1;
             double best_score = -1.0;

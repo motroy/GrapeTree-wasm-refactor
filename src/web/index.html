@@ -914,7 +914,7 @@
         </div>
     </div>
 
-    <script src="grapetree.js"></script>
+    <!-- grapetree.js is now loaded by the worker -->
     <script type="module">
         import GrapeTreeWASM from './wasm_loader.js';
         import FileHandler from './file_handler.js';
@@ -1384,22 +1384,25 @@
             
             try {
                 hideError();
-                showProgress();
-                
                 const method = document.getElementById('method-select').value;
+
+                showProgress(`Initializing ${method} computation...`);
+
                 const matrix = document.getElementById('matrix-select').value;
                 const missing = parseInt(document.getElementById('missing-select').value);
                 const heuristic = document.getElementById('heuristic-select').value;
                 
-                statusInfo.textContent = `Computing ${method} tree...`;
                 const startTime = performance.now();
                 
-                currentTree = grapetree.computeTree({
+                // Use await since computation is now async in a worker
+                currentTree = await grapetree.computeTree({
                     data: currentData,
                     method,
                     matrix,
                     missing,
                     heuristic
+                }, (task, percent) => {
+                    updateProgress(task, percent);
                 });
                 
                 const endTime = performance.now();
@@ -1531,15 +1534,21 @@
 
             try {
                 hideError();
-                showProgress();
+                showProgress('Initializing matrix computation...');
 
                 const matrix = document.getElementById('matrix-select').value;
                 const missing = parseInt(document.getElementById('missing-select').value);
 
-                statusInfo.textContent = 'Computing distance matrix...';
                 const startTime = performance.now();
 
-                currentMatrix = grapetree.computeDistanceMatrix(currentData, matrix, missing);
+                currentMatrix = await grapetree.computeDistanceMatrix(
+                    currentData,
+                    matrix,
+                    missing,
+                    (task, percent) => {
+                        updateProgress(task, percent);
+                    }
+                );
 
                 const endTime = performance.now();
                 const duration = ((endTime - startTime) / 1000).toFixed(2);
@@ -1643,12 +1652,27 @@
             errorMessage.style.display = 'none';
         }
         
-        function showProgress() {
+        function showProgress(message) {
             progressBar.style.display = 'block';
+            const fill = progressBar.querySelector('.progress-fill');
+            // Reset to indeterminate state initially
+            fill.style.width = '0%';
+            fill.style.animation = 'progress 1.5s infinite';
+            if (message) statusInfo.textContent = message;
+        }
+
+        function updateProgress(task, percent) {
+            const fill = progressBar.querySelector('.progress-fill');
+            fill.style.animation = 'none';
+            fill.style.width = Math.max(5, percent) + '%';
+            if (task) statusInfo.textContent = `${task} (${Math.round(percent)}%)`;
         }
         
         function hideProgress() {
             progressBar.style.display = 'none';
+            // Reset for next time
+            const fill = progressBar.querySelector('.progress-fill');
+            fill.style.width = '0%';
         }
         
         function displayTree(tree) {
