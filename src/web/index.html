@@ -1059,7 +1059,15 @@
                 statusInfo.textContent = 'Ready to load data';
                 console.log('GrapeTree WASM initialized');
             } catch (error) {
-                showError('Failed to initialize: ' + error.message);
+                const msg = 'GrapeTree WebAssembly module failed to load. Tree computation is disabled. ' +
+                            (error.message || String(error));
+                showError(msg);
+                console.error(error);
+                // Disable compute buttons permanently if WASM fails
+                computeBtn.disabled = true;
+                computeMatrixBtn.disabled = true;
+                computeBtn.title = msg;
+                computeMatrixBtn.title = msg;
             }
         }
         
@@ -1382,6 +1390,12 @@
 
         // Compute tree
         computeBtn.addEventListener('click', async () => {
+            if (!grapetree || !grapetree.isInitialized) {
+                const cause = (grapetree && grapetree.initError) ? grapetree.initError.message : 'Unknown error';
+                showError('Cannot compute tree: WebAssembly module failed to load. ' + cause);
+                return;
+            }
+
             if (!currentData) {
                 showError('Please load a data file first');
                 return;
@@ -1527,6 +1541,12 @@
 
         // Compute Distance Matrix
         computeMatrixBtn.addEventListener('click', async () => {
+            if (!grapetree || !grapetree.isInitialized) {
+                const cause = (grapetree && grapetree.initError) ? grapetree.initError.message : 'Unknown error';
+                showError('Cannot compute matrix: WebAssembly module failed to load. ' + cause);
+                return;
+            }
+
             if (!currentData) {
                 showError('Please load a data file first');
                 return;
