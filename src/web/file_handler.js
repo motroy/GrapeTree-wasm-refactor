@@ -1,12 +1,20 @@
-// file_handler.js - Parse GrapeTree input files
-// Handles MLST profiles, FASTA files, and metadata
 
 class FileHandler {
     constructor() {
         this.worker = new Worker('worker.js');
         this.workerResolves = new Map();
         this.worker.onmessage = this._handleWorkerMessage.bind(this);
+        this.worker.onerror = this._handleWorkerError.bind(this);
         this.msgId = 0;
+    }
+
+    _handleWorkerError(e) {
+        console.error('FileHandler Worker error:', e);
+        // Reject all pending requests
+        for (const [id, { reject }] of this.workerResolves) {
+            reject(new Error('Worker error: ' + (e.message || 'Unknown error')));
+        }
+        this.workerResolves.clear();
     }
 
     _handleWorkerMessage(e) {
@@ -51,7 +59,7 @@ class FileHandler {
         }
     }
     
-    // parseProfile and parseFasta are now handled in worker.js
+    // ... (rest of the file unchanged)
     
     /**
      * Parse JSON format (GrapeTree session or pre-computed lineage)
