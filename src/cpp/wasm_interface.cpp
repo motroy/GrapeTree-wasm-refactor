@@ -3,6 +3,7 @@
 
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
+#include <emscripten/emscripten.h>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -20,17 +21,18 @@ using json = nlohmann::json;
 using namespace grapetree;
 
 // Helper to report progress back to JavaScript worker
+EM_JS(void, report_progress_js, (const char* task, double percent), {
+    if (typeof postMessage === 'function') {
+        postMessage({
+            type: 'progress',
+            task: UTF8ToString(task),
+            value: percent
+        });
+    }
+});
+
 void report_progress(const char* task, double percent) {
-    // Check if we are in a worker environment where postMessage is available
-    EM_ASM({
-        if (typeof postMessage === 'function') {
-            postMessage({
-                type: 'progress',
-                task: UTF8ToString($0),
-                value: $1
-            });
-        }
-    }, task, percent);
+    report_progress_js(task, percent);
 }
 
 // Helper function to parse JSON profile data
