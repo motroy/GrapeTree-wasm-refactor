@@ -218,11 +218,30 @@
             padding: 15px;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            max-width: 250px;
-            max-height: 400px;
+            min-width: 140px;
+            max-width: 320px;
+            min-height: 60px;
+            max-height: 500px;
             overflow-y: auto;
+            overflow-x: hidden;
             font-size: 0.9rem;
             z-index: 100;
+            resize: both;
+        }
+
+        .legend-drag-handle {
+            cursor: grab;
+            height: 10px;
+            margin: -10px -10px 8px -10px;
+            border-radius: 8px 8px 0 0;
+            background-image: radial-gradient(circle, #bbb 1px, transparent 1px);
+            background-size: 5px 5px;
+            background-color: rgba(102, 126, 234, 0.08);
+            user-select: none;
+        }
+
+        .legend-drag-handle:active {
+            cursor: grabbing;
         }
 
         .legend-title {
@@ -770,6 +789,18 @@
                         </select>
                     </div>
                 </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-top:1rem;">
+                    <div class="control-group">
+                        <label for="node-label-size">Node Label Size: <span id="node-label-size-val">10px</span></label>
+                        <input type="range" id="node-label-size" min="6" max="28" value="10" step="1"
+                               style="width:100%;margin-top:0.3rem;">
+                    </div>
+                    <div class="control-group">
+                        <label for="branch-label-size">Branch Label Size: <span id="branch-label-size-val">9px</span></label>
+                        <input type="range" id="branch-label-size" min="0" max="20" value="9" step="1"
+                               style="width:100%;margin-top:0.3rem;">
+                    </div>
+                </div>
                 <div class="tab-hint">
                     Load metadata in the <strong>Data</strong> tab to enable <em>Fill Color By</em> and <em>Ring Color By</em>.
                 </div>
@@ -904,6 +935,10 @@
         // Custom per-value color overrides (persisted across re-renders)
         let customFillColors = {};   // { metadataValue: '#rrggbb' }
         let customRingColors = {};   // { metadataValue: '#rrggbb' }
+
+        // Legend position/size persisted across re-renders
+        let legendPosition = null;   // { left: px, top: px } or null (use CSS default)
+        let legendSize = null;       // { width: px, height: px } or null
 
         // pHierCC cluster state
         let currentHierCC = null;    // { clusterData, hcLevels }
@@ -1320,7 +1355,23 @@
                 displayTree(currentTree);
             }
         });
-        
+
+        // Node label size slider
+        const nodeLabelSizeInput = document.getElementById('node-label-size');
+        const nodeLabelSizeVal = document.getElementById('node-label-size-val');
+        nodeLabelSizeInput.addEventListener('input', () => {
+            nodeLabelSizeVal.textContent = nodeLabelSizeInput.value + 'px';
+            if (currentTree) displayTree(currentTree);
+        });
+
+        // Branch label size slider
+        const branchLabelSizeInput = document.getElementById('branch-label-size');
+        const branchLabelSizeVal = document.getElementById('branch-label-size-val');
+        branchLabelSizeInput.addEventListener('input', () => {
+            branchLabelSizeVal.textContent = branchLabelSizeInput.value + 'px';
+            if (currentTree) displayTree(currentTree);
+        });
+
         // Compute tree
         computeBtn.addEventListener('click', async () => {
             if (!currentData) {
@@ -1393,27 +1444,33 @@
             if (!currentTree || !currentData) return;
 
             // GrapeTree session format (compatible with MSTree_holder.html):
-            //   nodes   – ordered array of strain name strings
-            //   links   – [{source: int, target: int, distance: float}]
-            //   nwk     – Newick string (optional but useful)
-            //   metadata – {strainName: {col: val, ...}, ...}
-            const nodes = currentData.strains;
+            //   nodes       – ordered array of strain name strings
+            //   links       – [{source: int, target: int, distance: float}]
+            //   newickTree  – Newick string (original GrapeTree key)
+            //   nwk         – Newick string (WASM loader backward-compat key)
+            //   metadata    – {strainName: {col: val, ...}, ...}
+            const nodes = currentData.strains.slice(); // copy
             const links = currentTree.edges.map(e => ({
                 source: e.from,
                 target: e.to,
                 distance: e.distance
             }));
 
+            // Only include strains that have actual metadata entries
             const metadata = {};
             currentData.strains.forEach(strain => {
-                metadata[strain] = currentMetadata && currentMetadata[strain]
-                    ? Object.assign({}, currentMetadata[strain])
-                    : {};
+                if (currentMetadata && currentMetadata[strain]) {
+                    metadata[strain] = Object.assign({}, currentMetadata[strain]);
+                }
             });
 
-            const json = { nodes, links, metadata };
+            const json = { nodes, links };
+            if (Object.keys(metadata).length > 0) {
+                json.metadata = metadata;
+            }
             if (currentTree.newick) {
-                json.nwk = currentTree.newick;
+                json.newickTree = currentTree.newick; // original GrapeTree key
+                json.nwk = currentTree.newick;        // WASM loader backward-compat
             }
 
             downloadFile(JSON.stringify(json, null, 2), 'grapetree.json', 'application/json');
@@ -1593,11 +1650,18 @@
         
         function displayTree(tree) {
             const canvas = document.getElementById('tree-canvas');
+            // Clean up any existing legend drag listeners before clearing
+            const existingLegend = canvas.querySelector('.legend');
+            if (existingLegend && existingLegend._cleanupDrag) existingLegend._cleanupDrag();
             canvas.innerHTML = '';
             canvas.style.position = 'relative';
 
             const width = canvas.clientWidth || 900;
             const height = 600;
+
+            // Read label size preferences
+            const nodeLabelSize = parseInt(document.getElementById('node-label-size')?.value || 10);
+            const branchLabelSize = parseInt(document.getElementById('branch-label-size')?.value || 9);
 
             const selectedColumn = colorSelect.value;
             const hcSelectedLevel = hcLevelSelect ? hcLevelSelect.value : '';
@@ -1822,7 +1886,11 @@
                     .join('path')
                     .attr('class', 'cluster-hull')
                     .attr('fill', d => hullColorMapping[d.value] || '#ccc')
+                    .attr('fill-opacity', 0.18)
                     .attr('stroke', d => hullColorMapping[d.value] || '#ccc')
+                    .attr('stroke-width', 2)
+                    .attr('stroke-opacity', 0.4)
+                    .style('pointer-events', 'none')
                     .attr('d', d => 'M' + d.hull.join('L') + 'Z');
             }
 
@@ -1855,9 +1923,9 @@
             // Edge distance labels (integers, like original GrapeTree)
             const linkLabel = g.append('g')
                 .selectAll('text')
-                .data(links.filter(d => d.distance > 0))
+                .data(branchLabelSize > 0 ? links.filter(d => d.distance > 0) : [])
                 .join('text')
-                .attr('font-size', '9px')
+                .attr('font-size', branchLabelSize + 'px')
                 .attr('fill', '#666')
                 .attr('text-anchor', 'middle')
                 .attr('pointer-events', 'none')
@@ -1957,7 +2025,7 @@
                 .selectAll('text')
                 .data(nodes)
                 .join('text')
-                .attr('font-size', '10px')
+                .attr('font-size', nodeLabelSize + 'px')
                 .attr('dx', nodeRadius + 3)
                 .attr('dy', '0.35em')
                 .style('fill', '#333')
@@ -2033,7 +2101,18 @@
             if (hasFill || hasRing) {
                 const legend = document.createElement('div');
                 legend.className = 'legend';
-                let legendHTML = '';
+                // Restore saved position and size
+                if (legendPosition) {
+                    legend.style.left = legendPosition.left + 'px';
+                    legend.style.top = legendPosition.top + 'px';
+                    legend.style.right = 'auto';
+                }
+                if (legendSize) {
+                    legend.style.width = legendSize.width + 'px';
+                    legend.style.height = legendSize.height + 'px';
+                }
+                // Drag handle prepended to legend content
+                let legendHTML = '<div class="legend-drag-handle" title="Drag to move legend"></div>';
 
                 if (hasFill) {
                     const titleText = hasRing
@@ -2082,9 +2161,70 @@
                     });
                 }
 
-                legendHTML += '<div class="swatch-hint">Click row to select cluster · Click swatch to change color</div>';
+                legendHTML += '<div class="swatch-hint">Drag handle to move · Resize from corner · Click swatch to change color</div>';
                 legend.innerHTML = legendHTML;
                 canvas.appendChild(legend);
+
+                // --- Legend drag ---
+                {
+                    const handle = legend.querySelector('.legend-drag-handle');
+                    let dragging = false, dragStartX, dragStartY, dragStartLeft, dragStartTop;
+
+                    handle.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        dragging = true;
+                        dragStartX = e.clientX;
+                        dragStartY = e.clientY;
+                        const canvasRect = canvas.getBoundingClientRect();
+                        const legendRect = legend.getBoundingClientRect();
+                        // Convert current position to left/top if right-anchored
+                        dragStartLeft = legendRect.left - canvasRect.left;
+                        dragStartTop = legendRect.top - canvasRect.top;
+                        legend.style.right = 'auto';
+                        legend.style.left = dragStartLeft + 'px';
+                        legend.style.top = dragStartTop + 'px';
+                        handle.style.cursor = 'grabbing';
+                    });
+
+                    const onMouseMove = (e) => {
+                        if (!dragging) return;
+                        const dx = e.clientX - dragStartX;
+                        const dy = e.clientY - dragStartY;
+                        const newLeft = Math.max(0, dragStartLeft + dx);
+                        const newTop = Math.max(0, dragStartTop + dy);
+                        legend.style.left = newLeft + 'px';
+                        legend.style.top = newTop + 'px';
+                        legendPosition = { left: newLeft, top: newTop };
+                    };
+
+                    const onMouseUp = () => {
+                        if (!dragging) return;
+                        dragging = false;
+                        handle.style.cursor = 'grab';
+                    };
+
+                    window.addEventListener('mousemove', onMouseMove);
+                    window.addEventListener('mouseup', onMouseUp);
+
+                    // Remove listeners when legend is removed from DOM (next render)
+                    const cleanupDrag = () => {
+                        window.removeEventListener('mousemove', onMouseMove);
+                        window.removeEventListener('mouseup', onMouseUp);
+                    };
+                    legend._cleanupDrag = cleanupDrag;
+                }
+
+                // --- Legend resize (save size via ResizeObserver) ---
+                if (window.ResizeObserver) {
+                    const ro = new ResizeObserver(entries => {
+                        for (const entry of entries) {
+                            const w = entry.contentRect.width;
+                            const h = entry.contentRect.height;
+                            if (w > 0 && h > 0) legendSize = { width: w, height: h };
+                        }
+                    });
+                    ro.observe(legend);
+                }
 
                 // --- Cluster row selection ---
                 legend.querySelectorAll('.legend-item.selectable').forEach(row => {

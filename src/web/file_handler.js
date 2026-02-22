@@ -194,26 +194,36 @@ class FileHandler {
      * Optionally supports:
      *   nodes: ["name0", "name1", ...]  — explicit node labels
      *   metadata: {"name0": {col: val}, ...}  — embedded metadata for color-by
+     *   newickTree / nwk               — Newick string (original GrapeTree / WASM keys)
      */
     _extractFromLinksFormat(data) {
         if (data.links.length === 0) {
             throw new Error('Links array is empty');
         }
 
-        // Collect all unique node indices
+        // Collect all unique node indices appearing in edges
         const nodeSet = new Set();
         for (const link of data.links) {
             nodeSet.add(link.source);
             nodeSet.add(link.target);
         }
+
+        // If an explicit nodes array is provided, include ALL of those indices too
+        // (handles isolated nodes that have no edges)
+        const hasLabels = Array.isArray(data.nodes) && data.nodes.length > 0;
+        if (hasLabels) {
+            for (let i = 0; i < data.nodes.length; i++) {
+                nodeSet.add(i);
+            }
+        }
+
         const nodeIndices = Array.from(nodeSet).sort((a, b) => a - b);
 
         // Map original indices to sequential 0-based indices
         const indexMap = new Map();
         nodeIndices.forEach((idx, i) => { indexMap.set(idx, i); });
 
-        // Use explicit node labels if provided, otherwise fall back to string indices
-        const hasLabels = Array.isArray(data.nodes) && data.nodes.length > 0;
+        // Build strain name list
         const strains = nodeIndices.map(idx =>
             hasLabels && data.nodes[idx] !== undefined ? String(data.nodes[idx]) : String(idx)
         );
@@ -221,7 +231,8 @@ class FileHandler {
         const edges = data.links.map(link => ({
             from: indexMap.get(link.source),
             to: indexMap.get(link.target),
-            distance: link.distance
+            // accept both 'distance' (WASM) and 'value' (original GrapeTree) keys
+            distance: link.distance !== undefined ? link.distance : (link.value || 0)
         }));
 
         const result = {
@@ -231,7 +242,8 @@ class FileHandler {
                 edges,
                 nNodes: strains.length,
                 nEdges: edges.length,
-                newick: null
+                // accept 'newickTree' (original GrapeTree) or 'nwk' (WASM loader)
+                newick: data.newickTree || data.nwk || null
             }
         };
 
