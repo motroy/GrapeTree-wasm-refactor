@@ -919,7 +919,6 @@
         import GrapeTreeWASM from './wasm_loader.js';
         import FileHandler from './file_handler.js';
         import HierCC from './hiercc.js';
-        import Clustering from './clustering.js';
 
         // Initialize application
         let grapetree = null;
@@ -1059,15 +1058,7 @@
                 statusInfo.textContent = 'Ready to load data';
                 console.log('GrapeTree WASM initialized');
             } catch (error) {
-                const msg = 'GrapeTree WebAssembly module failed to load. Tree computation is disabled. ' +
-                            (error.message || String(error));
-                showError(msg);
-                console.error(error);
-                // Disable compute buttons permanently if WASM fails
-                computeBtn.disabled = true;
-                computeMatrixBtn.disabled = true;
-                computeBtn.title = msg;
-                computeMatrixBtn.title = msg;
+                showError('Failed to initialize: ' + error.message);
             }
         }
         
@@ -1390,12 +1381,6 @@
 
         // Compute tree
         computeBtn.addEventListener('click', async () => {
-            if (!grapetree || !grapetree.isInitialized) {
-                const cause = (grapetree && grapetree.initError) ? grapetree.initError.message : 'Unknown error';
-                showError('Cannot compute tree: WebAssembly module failed to load. ' + cause);
-                return;
-            }
-
             if (!currentData) {
                 showError('Please load a data file first');
                 return;
@@ -1541,12 +1526,6 @@
 
         // Compute Distance Matrix
         computeMatrixBtn.addEventListener('click', async () => {
-            if (!grapetree || !grapetree.isInitialized) {
-                const cause = (grapetree && grapetree.initError) ? grapetree.initError.message : 'Unknown error';
-                showError('Cannot compute matrix: WebAssembly module failed to load. ' + cause);
-                return;
-            }
-
             if (!currentData) {
                 showError('Please load a data file first');
                 return;
@@ -2386,15 +2365,9 @@
             const canvas = document.getElementById('tree-canvas');
             canvas.innerHTML = '';
 
-            // Compute clustered order
-            const order = Clustering.computeMSTOrder(matrixData.matrix);
-
-            // Reorder strain names and matrix for display
-            const n = matrixData.strainNames.length;
-            const strainNames = order.map(i => matrixData.strainNames[i]);
-            // Note: we reorder rows/cols but keep values intact.
-            // Even if matrix is asymmetric, we permute both axes by same clustering order.
-            const matrix = order.map(i => order.map(j => matrixData.matrix[i][j]));
+            const strainNames = matrixData.strainNames;
+            const matrix = matrixData.matrix;
+            const n = strainNames.length;
 
             // --- Cluster data (if an HC level is selected) ---
             const hcSelectedLevel = hcLevelSelect ? hcLevelSelect.value : '';
