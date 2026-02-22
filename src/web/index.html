@@ -982,6 +982,12 @@
             document.querySelectorAll('.tab-pane').forEach(pane => {
                 pane.classList.toggle('active', pane.id === 'tab-' + tabId);
             });
+            // pHierCCval section is only relevant to the Clusters tab
+            const phierccvalSection = document.getElementById('phierccval-section');
+            if (phierccvalSection) {
+                phierccvalSection.style.display =
+                    (tabId === 'clusters' && currentNMIMatrix) ? 'block' : 'none';
+            }
         }
 
         function setTabBadge(tabId, text) {
@@ -2585,7 +2591,10 @@
                 silBlock.appendChild(note);
             }
 
-            document.getElementById('phierccval-section').style.display = 'block';
+            const activeTab = document.querySelector('.tab-btn.active');
+            if (activeTab && activeTab.dataset.tab === 'clusters') {
+                document.getElementById('phierccval-section').style.display = 'block';
+            }
         }
 
         /** D3 NMI heatmap. */
