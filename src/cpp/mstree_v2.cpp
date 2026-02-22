@@ -22,13 +22,21 @@ struct Edge;
 class MSTreeV2 {
 private:
     int n_nodes_;
-    std::vector<std::vector<double>> distance_matrix_;
+    std::vector<double> distance_matrix_;
     
+    // Private constructor for recursion
+    MSTreeV2(std::vector<double>&& distances, int n)
+        : n_nodes_(n), distance_matrix_(std::move(distances)) {}
+
 public:
     explicit MSTreeV2(
         const std::vector<std::vector<double>>& distances
-    ) : distance_matrix_(distances),
-        n_nodes_(distances.size()) {}
+    ) : n_nodes_(distances.size()) {
+        distance_matrix_.reserve(n_nodes_ * n_nodes_);
+        for (const auto& row : distances) {
+            distance_matrix_.insert(distance_matrix_.end(), row.begin(), row.end());
+        }
+    }
     
     std::vector<Edge> compute(std::function<void(double)> progress_cb = nullptr) {
         if (progress_cb) progress_cb(0.0);
@@ -51,7 +59,9 @@ public:
         if (progress_cb) progress_cb(80.0);
 
         // Phase 4: Local branch recrafting optimization
-        recraft_branches(min_incoming);
+        // Disabled because it can create cycles in directed graphs (e.g. self-loops),
+        // breaking the tree structure required for Newick output.
+        // recraft_branches(min_incoming);
         
         if (progress_cb) progress_cb(100.0);
 
@@ -79,7 +89,7 @@ private:
             for (int from = 0; from < n_nodes_; ++from) {
                 if (from == to) continue;
                 
-                double dist = distance_matrix_[from][to];
+                double dist = distance_matrix_[from * n_nodes_ + to];
                 
                 if (dist < min_dist) {
                     min_dist = dist;
@@ -110,7 +120,7 @@ private:
         for (int i = 0; i < n_nodes_; ++i) {
             if (i == node) continue;
             
-            double dist = distance_matrix_[node][i];
+            double dist = distance_matrix_[node * n_nodes_ + i];
             if (dist > 0.0) {
                 sum += 1.0 / dist;
                 count++;
@@ -222,15 +232,20 @@ private:
         
         // Build contracted distance matrix and edge mapping
         int new_size = next_node;
-        std::vector<std::vector<double>> new_distances(
-            new_size,
-            std::vector<double>(new_size, 
-                               std::numeric_limits<double>::max())
+        std::vector<double> new_distances(
+            new_size * new_size,
+            std::numeric_limits<double>::max()
         );
         
         // Map: (contracted_from, contracted_to) -> Original Edge
         // We use int pair for key as Edge might not be comparable
         std::map<std::pair<int, int>, Edge> edge_mapping;
+
+        // Precompute cycle edge weights
+        std::vector<double> cycle_edge_weights(n_nodes_, 0.0);
+        for(const auto& e : edges) {
+            cycle_edge_weights[e.to] = e.distance;
+        }
 
         for (int i = 0; i < n_nodes_; ++i) {
             for (int j = 0; j < n_nodes_; ++j) {
@@ -240,23 +255,16 @@ private:
                 int nj = node_mapping[j];
                 
                 if (ni != nj) {
-                    double dist = distance_matrix_[i][j];
+                    double dist = distance_matrix_[i * n_nodes_ + j];
                     double reduced_dist = dist;
 
                     // If target is in a cycle, reduce weight
                     if (cycle_id[j] != -1) {
-                        double cycle_edge_weight = 0;
-                        for(const auto& e : edges) {
-                            if (e.to == j) {
-                                cycle_edge_weight = e.distance;
-                                break;
-                            }
-                        }
-                        reduced_dist -= cycle_edge_weight;
+                        reduced_dist -= cycle_edge_weights[j];
                     }
 
-                    if (reduced_dist < new_distances[ni][nj]) {
-                        new_distances[ni][nj] = reduced_dist;
+                    if (reduced_dist < new_distances[ni * new_size + nj]) {
+                        new_distances[ni * new_size + nj] = reduced_dist;
                         // We construct Edge manually to avoid needing default constructor if it doesn't have one
                         // But Edge structure is simple struct in mstree.cpp
                         edge_mapping.erase({ni, nj});
@@ -267,7 +275,7 @@ private:
         }
         
         // Recursively solve on contracted graph
-        MSTreeV2 contracted_solver(new_distances);
+        MSTreeV2 contracted_solver(std::move(new_distances), new_size);
         std::vector<Edge> contracted_edges = contracted_solver.compute();
         
         // Expand solution back to original graph
@@ -349,10 +357,10 @@ private:
         const Edge& e2 = tree[idx2];
         
         // Try alternative connections
-        double cost1 = distance_matrix_[e1.from][e2.to] +
-                      distance_matrix_[e2.from][e1.to];
-        double cost2 = distance_matrix_[e1.to][e2.from] +
-                      distance_matrix_[e2.to][e1.from];
+        double cost1 = distance_matrix_[e1.from * n_nodes_ + e2.to] +
+                      distance_matrix_[e2.from * n_nodes_ + e1.to];
+        double cost2 = distance_matrix_[e1.to * n_nodes_ + e2.from] +
+                      distance_matrix_[e2.to * n_nodes_ + e1.from];
         
         return std::min(cost1, cost2);
     }
@@ -367,8 +375,8 @@ private:
         Edge& e2 = tree[idx2];
         
         std::swap(e1.to, e2.to);
-        e1.distance = distance_matrix_[e1.from][e1.to];
-        e2.distance = distance_matrix_[e2.from][e2.to];
+        e1.distance = distance_matrix_[e1.from * n_nodes_ + e1.to];
+        e2.distance = distance_matrix_[e2.from * n_nodes_ + e2.to];
     }
 };
 
