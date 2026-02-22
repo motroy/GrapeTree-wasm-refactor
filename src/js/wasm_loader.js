@@ -3,12 +3,14 @@
 
 class GrapeTreeWASM {
     constructor() {
-        this.module = null;
+        this.worker = null;
         this.isInitialized = false;
+        this.pendingRequests = new Map();
+        this.nextRequestId = 1;
     }
     
     /**
-     * Initialize the WASM module
+     * Initialize the WASM module via Web Worker
      * @returns {Promise<GrapeTreeWASM>}
      */
     async init() {
@@ -16,16 +18,57 @@ class GrapeTreeWASM {
             return this;
         }
         
-        try {
-            // Load the WASM module (Emscripten generated)
-            this.module = await GrapeTreeWASMModule();
-            this.isInitialized = true;
-            console.log('GrapeTree WASM module initialized successfully');
-            return this;
-        } catch (error) {
-            console.error('Failed to initialize WASM module:', error);
-            throw new Error(`WASM initialization failed: ${error.message}`);
-        }
+        return new Promise((resolve, reject) => {
+            try {
+                this.worker = new Worker('worker.js');
+
+                this.worker.onmessage = (e) => {
+                    const { type, id, result, error, task, value } = e.data;
+
+                    if (type === 'init_done') {
+                        this.isInitialized = true;
+                        console.log('GrapeTree WASM worker initialized successfully');
+                        resolve(this);
+                    } else if (type === 'result') {
+                        const request = this.pendingRequests.get(id);
+                        if (request) {
+                            request.resolve(result);
+                            this.pendingRequests.delete(id);
+                        }
+                    } else if (type === 'error') {
+                        const request = this.pendingRequests.get(id);
+                        if (request) {
+                            request.reject(new Error(error));
+                            this.pendingRequests.delete(id);
+                        } else {
+                            console.error('Worker error:', error);
+                            // If it's the init request
+                            if (!this.isInitialized) reject(new Error(error));
+                        }
+                    } else if (type === 'progress') {
+                        // Forward progress to active request
+                        // Since worker processes sequentially, we send to all pending requests
+                        // (though typically only one is active)
+                        for (const req of this.pendingRequests.values()) {
+                            if (req.onProgress) {
+                                req.onProgress(task, value);
+                            }
+                        }
+                    }
+                };
+
+                this.worker.onerror = (e) => {
+                    console.error('Worker error:', e);
+                    reject(new Error('Worker failed to start: ' + (e.message || 'Unknown error')));
+                };
+
+                this.worker.postMessage({ type: 'init' });
+
+            } catch (error) {
+                console.error('Failed to initialize worker:', error);
+                reject(error);
+            }
+        });
     }
     
     /**
@@ -36,9 +79,10 @@ class GrapeTreeWASM {
      * @param {string} options.matrix - Matrix type: 'symmetric', 'asymmetric'
      * @param {number} options.missing - Missing data handler: 0-3
      * @param {string} options.heuristic - Tiebreak heuristic: 'eBurst', 'harmonic'
-     * @returns {Object} Tree result with newick, edges, nodes
+     * @param {Function} onProgress - Callback for progress updates (task, percent)
+     * @returns {Promise<Object>} Tree result with newick, edges, nodes
      */
-    computeTree(options) {
+    async computeTree(options, onProgress) {
         this._checkInitialized();
         
         const {
@@ -53,19 +97,14 @@ class GrapeTreeWASM {
         this._validateTreeOptions(data, method, matrix, missing, heuristic);
         
         try {
-            // Convert data to JSON string
-            const profileJson = JSON.stringify(data);
-            
-            // Call WASM function
-            const resultJson = this.module.compute_tree(
-                profileJson,
+            const resultJson = await this._sendRequest('compute_tree', {
+                data,
                 method,
                 matrix,
                 missing,
                 heuristic
-            );
+            }, onProgress);
             
-            // Parse result
             const result = JSON.parse(resultJson);
             
             if (!result.success) {
@@ -90,19 +129,18 @@ class GrapeTreeWASM {
      * @param {Object} data - Profile data
      * @param {string} matrixType - 'symmetric' or 'asymmetric'
      * @param {number} missing - Missing data handler
-     * @returns {Object} Distance matrix result
+     * @param {Function} onProgress - Callback for progress updates (task, percent)
+     * @returns {Promise<Object>} Distance matrix result
      */
-    computeDistanceMatrix(data, matrixType = 'symmetric', missing = 0) {
+    async computeDistanceMatrix(data, matrixType = 'symmetric', missing = 0, onProgress) {
         this._checkInitialized();
         
         try {
-            const profileJson = JSON.stringify(data);
-            
-            const resultJson = this.module.compute_distance_matrix(
-                profileJson,
+            const resultJson = await this._sendRequest('compute_distance_matrix', {
+                data,
                 matrixType,
                 missing
-            );
+            }, onProgress);
             
             const result = JSON.parse(resultJson);
             
@@ -120,6 +158,14 @@ class GrapeTreeWASM {
             console.error('Distance matrix computation error:', error);
             throw error instanceof Error ? error : new Error(String(error));
         }
+    }
+
+    _sendRequest(type, data, onProgress) {
+        return new Promise((resolve, reject) => {
+            const id = this.nextRequestId++;
+            this.pendingRequests.set(id, { resolve, reject, onProgress });
+            this.worker.postMessage({ type, id, data });
+        });
     }
     
     /**
@@ -155,8 +201,8 @@ class GrapeTreeWASM {
     // Private helper methods
     
     _checkInitialized() {
-        if (!this.isInitialized || !this.module) {
-            throw new Error('WASM module not initialized. Call init() first.');
+        if (!this.isInitialized || !this.worker) {
+            throw new Error('WASM worker not initialized. Call init() first.');
         }
     }
     

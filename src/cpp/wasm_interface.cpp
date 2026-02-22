@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <functional>
 
 // Include our GrapeTree modules
 #include "distance.cpp"
@@ -17,6 +18,20 @@
 using namespace emscripten;
 using json = nlohmann::json;
 using namespace grapetree;
+
+// Helper to report progress back to JavaScript worker
+void report_progress(const char* task, double percent) {
+    // Check if we are in a worker environment where postMessage is available
+    EM_ASM({
+        if (typeof postMessage === 'function') {
+            postMessage({
+                type: 'progress',
+                task: UTF8ToString($0),
+                value: $1
+            });
+        }
+    }, task, percent);
+}
 
 // Helper function to parse JSON profile data
 DistanceMatrix::ProfileData parse_profile_json(const std::string& json_str) {
@@ -60,6 +75,8 @@ std::string compute_tree(
     const std::string& heuristic
 ) {
     try {
+        report_progress("Parsing input", 0.0);
+
         // Parse input
         auto profile_data = parse_profile_json(profile_json);
         
@@ -67,29 +84,43 @@ std::string compute_tree(
         DistanceMatrix dm(profile_data);
         std::vector<std::vector<double>> distances;
         
+        // Distance calculation takes roughly 90% of time for large N
+        auto dist_progress = [](double p) {
+            report_progress("Computing distance matrix", p * 0.9);
+        };
+
         if (matrix_type == "symmetric") {
             distances = dm.compute_symmetric(
-                static_cast<DistanceMatrix::MissingHandler>(missing_handler)
+                static_cast<DistanceMatrix::MissingHandler>(missing_handler),
+                dist_progress
             );
         } else {
-            distances = dm.compute_asymmetric();
+            distances = dm.compute_asymmetric(dist_progress);
         }
         
         // Compute tree
         std::vector<Edge> tree_edges;
         
+        // Tree construction takes remaining 10%
+        auto tree_progress = [](double p) {
+            report_progress("Building tree", 90.0 + p * 0.1);
+        };
+
         if (method == "MSTree") {
             MSTree::Heuristic h = (heuristic == "harmonic") ?
                 MSTree::HARMONIC : MSTree::EBURST;
             MSTree mst(distances, h);
             tree_edges = mst.compute();
+            tree_progress(100.0);
         } else if (method == "MSTreeV2") {
             MSTreeV2 mst2(distances);
-            tree_edges = mst2.compute();
+            tree_edges = mst2.compute(tree_progress);
         } else {
             throw std::runtime_error("Unknown method: " + method);
         }
         
+        report_progress("Formatting output", 100.0);
+
         // Format output as Newick
         NewickFormatter formatter;
         std::string newick = formatter.format(
@@ -122,19 +153,28 @@ std::string compute_distance_matrix(
     int missing_handler
 ) {
     try {
+        report_progress("Parsing input", 0.0);
+
         auto profile_data = parse_profile_json(profile_json);
         
         DistanceMatrix dm(profile_data);
         std::vector<std::vector<double>> distances;
         
+        auto dist_progress = [](double p) {
+            report_progress("Computing distance matrix", p);
+        };
+
         if (matrix_type == "symmetric") {
             distances = dm.compute_symmetric(
-                static_cast<DistanceMatrix::MissingHandler>(missing_handler)
+                static_cast<DistanceMatrix::MissingHandler>(missing_handler),
+                dist_progress
             );
         } else {
-            distances = dm.compute_asymmetric();
+            distances = dm.compute_asymmetric(dist_progress);
         }
         
+        report_progress("Formatting output", 100.0);
+
         // Convert to JSON
         json response;
         response["success"] = true;
