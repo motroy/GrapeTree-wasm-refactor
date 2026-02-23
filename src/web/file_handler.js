@@ -37,8 +37,19 @@ class FileHandler {
      * @returns {Promise<Object>} Parsed data
      */
     async parse(file) {
-        const fileName = file.name.toLowerCase();
+        const fileName = file.name;
         const content = await this._readFile(file);
+        return this.parseContent(content, fileName);
+    }
+
+    /**
+     * Parse content directly
+     * @param {string} content - File content
+     * @param {string} fileName - Name of the file
+     * @returns {Promise<Object>} Parsed data
+     */
+    async parseContent(content, fileName) {
+        fileName = fileName.toLowerCase();
         
         if (fileName.endsWith('.fasta') || fileName.endsWith('.fa') || 
             fileName.endsWith('.fna')) {
@@ -143,7 +154,7 @@ class FileHandler {
      * Parse metadata file (tab or comma delimited)
      */
     parseMetadata(content) {
-        const lines = content.trim().split('\n');
+        const lines = content.trim().split(/\r\n|\n|\r/);
         
         if (lines.length < 2) {
             throw new Error('Metadata file must have at least a header and one data line');
