@@ -14,7 +14,7 @@ function detectDelimiter(line) {
 }
 
 function parseProfile(content) {
-    const lines = content.trim().split('\n');
+    const lines = content.trim().split(/\r\n|\n|\r/);
 
     if (lines.length < 2) {
         throw new Error('Profile file must have at least a header and one data line');
@@ -82,7 +82,7 @@ function parseFasta(content) {
     let currentStrain = null;
     let currentSequence = '';
 
-    const lines = content.split('\n');
+    const lines = content.split(/\r\n|\n|\r/);
 
     for (const line of lines) {
         const trimmed = line.trim();

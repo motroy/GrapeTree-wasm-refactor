@@ -696,6 +696,15 @@
                         <span>✓</span><span id="hiercc-file-name"></span>
                     </div>
                 </div>
+
+                <div class="control-group" style="margin-top: 1.5rem; border-top: 1px solid #e0e0e0; padding-top: 1.5rem;">
+                    <label>Example Data</label>
+                    <button class="btn-secondary" id="load-example-btn" style="width: 100%;">Load Example Data</button>
+                    <small style="color:#999;margin-top:0.4rem;display:block;">
+                        Load a simulated dataset (Salmonella Enteritidis) to explore functionality.
+                    </small>
+                </div>
+
                 <div class="tab-hint">
                     After uploading a data file, go to the <strong>Compute</strong> tab to build your tree.
                 </div>
@@ -1170,6 +1179,52 @@
 
             } catch (error) {
                 showError('Failed to load pHierCC file: ' + error.message);
+            }
+        });
+
+        // Load example data
+        document.getElementById('load-example-btn').addEventListener('click', async () => {
+            try {
+                showProgress('Loading example data...');
+
+                // Fetch profile
+                const profileResp = await fetch('examples/simulated_data.profile');
+                if (!profileResp.ok) throw new Error('Failed to fetch example profile');
+                const profileContent = await profileResp.text();
+
+                // Fetch metadata
+                const metadataResp = await fetch('examples/simulated_data.metadata.txt');
+                if (!metadataResp.ok) throw new Error('Failed to fetch example metadata');
+                const metadataContent = await metadataResp.text();
+
+                // Parse profile
+                statusInfo.textContent = 'Parsing example profile...';
+                currentData = await fileHandler.parseContent(profileContent, 'simulated_data.profile');
+                showFileBadge('data-file-badge', 'data-file-name', 'simulated_data.profile');
+
+                // Parse metadata
+                statusInfo.textContent = 'Parsing example metadata...';
+                const result = fileHandler.parseMetadata(metadataContent);
+                currentMetadata = result.metadata;
+
+                // Populate color selects
+                populateMetadataSelects(result.fields);
+                customFillColors = {};
+                customRingColors = {};
+
+                showFileBadge('metadata-file-badge', 'metadata-file-name', 'simulated_data.metadata.txt');
+
+                hideProgress();
+                statusInfo.textContent =
+                    `Loaded example data: ${currentData.strains.length} strains with ` +
+                    `${currentData.profiles[0].length} loci`;
+
+                computeBtn.disabled = false;
+                switchTab('compute');
+
+            } catch (error) {
+                hideProgress();
+                showError('Failed to load example data: ' + error.message);
             }
         });
 
