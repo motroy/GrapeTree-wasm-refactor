@@ -3,7 +3,7 @@
 
 class FileHandler {
     constructor() {
-        this.worker = new Worker('worker.js');
+        this.worker = new Worker('worker.js?v=2');
         this.workerResolves = new Map();
         this.worker.onmessage = this._handleWorkerMessage.bind(this);
         this.msgId = 0;
