@@ -37,10 +37,21 @@ class FileHandler {
      * @returns {Promise<Object>} Parsed data
      */
     async parse(file) {
-        const fileName = file.name.toLowerCase();
+        const fileName = file.name;
         const content = await this._readFile(file);
-        
-        if (fileName.endsWith('.fasta') || fileName.endsWith('.fa') || 
+        return this.parseContent(content, fileName);
+    }
+
+    /**
+     * Parse content directly
+     * @param {string} content - File content
+     * @param {string} fileName - Name of the file
+     * @returns {Promise<Object>} Parsed data
+     */
+    async parseContent(content, fileName) {
+        fileName = fileName.toLowerCase();
+
+        if (fileName.endsWith('.fasta') || fileName.endsWith('.fa') ||
             fileName.endsWith('.fna')) {
             return this._parseInWorker(content, fileName);
         } else if (fileName.endsWith('.json')) {
