@@ -237,14 +237,13 @@ private:
         return static_cast<double>(differences);
     }
     
-    // Directional distance for MSTreeV2 (asymmetric)
-    // Matches original GrapeTree Python implementation:
-    //   diffs = sum((from != to) & to_present) * total_loci / present_in_to
-    // Only loci where the destination (to) has data are considered.
-    // Missing in source counts as a difference; missing in destination is excluded.
-    // Normalization by destination completeness preserves comparable scale across
-    // profiles with different numbers of typed loci, and biases the tree to grow
-    // outward from more complete profiles (incomplete destinations appear more distant).
+    // Directional distance for MSTreeV2 (asymmetric).
+    // Formula from the paper (Zhou et al. 2018):
+    //   d(u→v) = #{l : π_l(v)≠0 ∧ π_l(u)≠π_l(v)} / N_v
+    // where N_v = #{l : π_l(v)≠0}.
+    // Only loci where the destination (v) has data are considered.
+    // A missing allele in the source (0) always differs from a present destination allele.
+    // The result is in [0, 1] and is used directly in ModelSelection arithmetic.
     double compute_directional_distance(
         const std::vector<int>& from_profile,
         const std::vector<int>& to_profile
@@ -257,10 +256,8 @@ private:
             int to_allele = to_profile[k];
 
             if (to_allele > 0) {
-                // Only consider loci where destination has data
                 present_in_to++;
                 if (from_allele != to_allele) {
-                    // Counts as difference: includes case where from is missing (0 != to_allele)
                     differences++;
                 }
             }
@@ -270,10 +267,7 @@ private:
             return 0.0;
         }
 
-        // Normalize by destination completeness: scale up to full-locus equivalents
-        return static_cast<double>(differences) *
-               static_cast<double>(data_.n_genes) /
-               static_cast<double>(present_in_to);
+        return static_cast<double>(differences) / static_cast<double>(present_in_to);
     }
     
     // p-distance for DNA sequences
