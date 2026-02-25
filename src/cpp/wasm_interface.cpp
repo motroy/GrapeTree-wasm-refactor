@@ -126,7 +126,7 @@ std::string compute_tree(
             } else {
                 flat_distances = dm.compute_asymmetric_flat(dist_progress);
             }
-            MSTreeV2 mst2(std::move(flat_distances), n);
+            MSTreeV2 mst2(std::move(flat_distances), n, profile_data.n_genes);
             tree_edges = mst2.compute(tree_progress);
         } else {
             throw std::runtime_error("Unknown method: " + method);
