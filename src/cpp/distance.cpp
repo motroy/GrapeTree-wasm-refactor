@@ -238,30 +238,42 @@ private:
     }
     
     // Directional distance for MSTreeV2 (asymmetric)
+    // Matches original GrapeTree Python implementation:
+    //   diffs = sum((from != to) & to_present) * total_loci / present_in_to
+    // Only loci where the destination (to) has data are considered.
+    // Missing in source counts as a difference; missing in destination is excluded.
+    // Normalization by destination completeness preserves comparable scale across
+    // profiles with different numbers of typed loci, and biases the tree to grow
+    // outward from more complete profiles (incomplete destinations appear more distant).
     double compute_directional_distance(
         const std::vector<int>& from_profile,
         const std::vector<int>& to_profile
     ) {
         int differences = 0;
-        int missing_in_from = 0;
-        
+        int present_in_to = 0;
+
         for (int k = 0; k < data_.n_genes; ++k) {
             int from_allele = from_profile[k];
             int to_allele = to_profile[k];
-            
-            if (from_allele <= 0) {
-                // Missing data in 'from' profile
-                missing_in_from++;
-            } else if (to_allele > 0 && from_allele != to_allele) {
-                // Both present but different
-                differences++;
+
+            if (to_allele > 0) {
+                // Only consider loci where destination has data
+                present_in_to++;
+                if (from_allele != to_allele) {
+                    // Counts as difference: includes case where from is missing (0 != to_allele)
+                    differences++;
+                }
             }
         }
-        
-        // Asymmetric: penalize missing data in source node
-        // This encourages the tree to grow from complete profiles
-        return static_cast<double>(differences) + 
-               0.5 * static_cast<double>(missing_in_from);
+
+        if (present_in_to == 0) {
+            return 0.0;
+        }
+
+        // Normalize by destination completeness: scale up to full-locus equivalents
+        return static_cast<double>(differences) *
+               static_cast<double>(data_.n_genes) /
+               static_cast<double>(present_in_to);
     }
     
     // p-distance for DNA sequences
