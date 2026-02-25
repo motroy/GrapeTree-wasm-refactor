@@ -88,7 +88,7 @@ private:
 
             double min_dist = std::numeric_limits<double>::max();
             int best_from = -1;
-            double best_score = -1.0;
+            double best_score = std::numeric_limits<double>::max();
             
             for (int from = 0; from < n_nodes_; ++from) {
                 if (from == to) continue;
@@ -100,9 +100,10 @@ private:
                     best_from = from;
                     best_score = harmonic_mean_score(from);
                 } else if (std::abs(dist - min_dist) < 1e-10) {
-                    // Tiebreak using harmonic mean
+                    // Tiebreak: prefer source with smaller ht (more central).
+                    // Paper sorts edges in ascending order of ht(u); smaller = preferred.
                     double score = harmonic_mean_score(from);
-                    if (score > best_score) {
+                    if (score < best_score) {
                         best_from = from;
                         best_score = score;
                     }
