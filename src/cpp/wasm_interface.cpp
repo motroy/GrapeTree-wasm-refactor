@@ -123,11 +123,17 @@ std::string compute_tree(
                     static_cast<DistanceMatrix::MissingHandler>(missing_handler),
                     dist_progress
                 );
+                MSTreeV2 mst2(std::move(flat_distances), n, profile_data.n_genes);
+                tree_edges = mst2.compute(tree_progress);
             } else {
+                // Compute both the normalized [0,1] ratios (for the algorithm)
+                // and the raw allele-difference counts (for branch lengths).
                 flat_distances = dm.compute_asymmetric_flat(dist_progress);
+                std::vector<double> flat_raw = dm.compute_asymmetric_raw_flat();
+                MSTreeV2 mst2(std::move(flat_distances), std::move(flat_raw),
+                              n, profile_data.n_genes);
+                tree_edges = mst2.compute(tree_progress);
             }
-            MSTreeV2 mst2(std::move(flat_distances), n, profile_data.n_genes);
-            tree_edges = mst2.compute(tree_progress);
         } else {
             throw std::runtime_error("Unknown method: " + method);
         }
