@@ -352,6 +352,71 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // Helper: Reroot the component containing 'old_root' to be rooted at
+    // 'new_root', ensuring the directed tree structure is maintained.
+    // This reverses edges along the path from old_root to new_root.
+    // -----------------------------------------------------------------------
+    void reroot(int old_root, int new_root,
+                std::vector<Edge>& branches,
+                std::map<std::pair<int, int>, int>& edge_map,
+                const std::unordered_map<int, std::vector<int>>& adj)
+    {
+        if (old_root == new_root) return;
+
+        // BFS to find path and parent pointers for backtracking
+        std::unordered_map<int, int> parent;
+        std::queue<int> q;
+        q.push(old_root);
+        parent[old_root] = -1;
+
+        bool found = false;
+        while (!q.empty()) {
+            int u = q.front(); q.pop();
+            if (u == new_root) { found = true; break; }
+            if (adj.count(u)) {
+                for (int v : adj.at(u)) {
+                    if (parent.find(v) == parent.end()) {
+                        parent[v] = u;
+                        q.push(v);
+                    }
+                }
+            }
+        }
+
+        if (!found) return; // Should generally not happen if connected
+
+        // Reverse edges along the path from new_root up to old_root
+        int curr = new_root;
+        while (curr != old_root) {
+            int p = parent[curr];
+            // The edge currently exists as (p -> curr) in the tree.
+            // We want to flip it to (curr -> p).
+
+            // Find the edge index using the map (stored as {p, curr})
+            // Since we know p is the parent, and branches store parent->child,
+            // we look for {p, curr}.
+            auto key = std::make_pair(p, curr);
+            if (edge_map.find(key) == edge_map.end()) {
+                // Try reverse key just in case, though it shouldn't happen in valid dMST
+                key = std::make_pair(curr, p);
+            }
+
+            if (edge_map.count(key)) {
+                int idx = edge_map[key];
+                // Flip the edge in branches
+                branches[idx].from = curr;
+                branches[idx].to   = p;
+
+                // Update map: remove old key, insert new key {curr, p}
+                // (Note: we store directed pairs in edge_map to match branches)
+                edge_map.erase(key);
+                edge_map[{curr, p}] = idx;
+            }
+            curr = p;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Phase 4: local branch recrafting
     //
     // Faithful C++ port of _branch_recraft() from
@@ -400,6 +465,10 @@ private:
         std::unordered_map<int, std::vector<int>> groups;
         // childrens[v]  = tree-adjacent nodes of v (undirected, built lazily).
         std::unordered_map<int, std::vector<int>> childrens;
+
+        // Map directed edge (u, v) -> index in branches.
+        // Only tracks edges that have been processed and committed to a component.
+        std::map<std::pair<int,int>, int> edge_map;
 
         for (const Edge& e : branches) {
             for (int v : {e.from, e.to}) {
@@ -510,6 +579,8 @@ private:
                         if (contemporary(raw(D(t, tgt)), raw(D(tgt, t)),
                                          raw(d_src_t), raw(src_tgt), nl)) {
                             tried.insert(tgt);
+                            // Reroot the target component to 't' to allow incoming edge from 'src'
+                            reroot(tgt, t, branches, edge_map, childrens);
                             tgt = t;
                             break;
                         }
@@ -532,6 +603,7 @@ private:
                             if (!contemporary(raw(D(tgt, t)), raw(D(t, tgt)),
                                               raw(src_tgt), raw(d), nl)) {
                                 tried.insert(tgt);
+                                reroot(tgt, t, branches, edge_map, childrens);
                                 tgt = t;
                                 moved = true;
                                 break;
@@ -540,6 +612,7 @@ private:
                             if (contemporary(raw(D(t, tgt)), raw(D(tgt, t)),
                                              raw(d), raw(src_tgt), nl)) {
                                 tried.insert(tgt);
+                                reroot(tgt, t, branches, edge_map, childrens);
                                 tgt = t;
                                 moved = true;
                                 break;
@@ -560,6 +633,9 @@ private:
                                  branches[i + 1].distance < brlen);
 
             if (!needs_resort) {
+                // Record the finalized edge in our map so we can find/flip it later if needed.
+                edge_map[{src, tgt}] = i;
+
                 // Merge tgt's group into src's group.
                 int tid = group_id[tgt];
                 int sid = group_id[src];
