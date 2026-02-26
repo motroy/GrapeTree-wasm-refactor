@@ -125,6 +125,38 @@ public:
         return matrix;
     }
 
+    // Compute flat (1-D, row-major) asymmetric raw distance matrix.
+    // Stores the numerator of the directional formula only:
+    //   raw[i→j] = #{l : π_l(j)≠0 ∧ π_l(i)≠π_l(j)}
+    // These are the actual allele-difference counts used as branch lengths
+    // in the output tree (as opposed to the [0,1] normalized ratios used
+    // internally by the MSTreeV2 algorithm).
+    std::vector<double> compute_asymmetric_raw_flat(
+        std::function<void(double)> progress_cb = nullptr
+    ) {
+        int n = data_.n_strains;
+        std::vector<double> matrix(static_cast<size_t>(n) * n, 0.0);
+
+        int report_frequency = std::max(1, n / 100);
+
+        for (int i = 0; i < n; ++i) {
+            if (progress_cb && i % report_frequency == 0) {
+                progress_cb(static_cast<double>(i) / n * 100.0);
+            }
+            for (int j = 0; j < n; ++j) {
+                if (i != j) {
+                    matrix[i * n + j] = compute_directional_distance_raw(
+                        data_.profiles[i],
+                        data_.profiles[j]
+                    );
+                }
+            }
+        }
+
+        if (progress_cb) progress_cb(100.0);
+        return matrix;
+    }
+
     // Compute flat (1-D, row-major) symmetric distance matrix.
     std::vector<double> compute_symmetric_flat(
         MissingHandler handler = IGNORE,
@@ -270,6 +302,27 @@ private:
         return static_cast<double>(differences) / static_cast<double>(present_in_to);
     }
     
+    // Raw directional distance: numerator of compute_directional_distance.
+    // Returns #{l : π_l(to)≠0 ∧ π_l(from)≠π_l(to)} as a plain count.
+    // Used to label output tree edges with true allele-difference counts.
+    double compute_directional_distance_raw(
+        const std::vector<int>& from_profile,
+        const std::vector<int>& to_profile
+    ) {
+        int differences = 0;
+
+        for (int k = 0; k < data_.n_genes; ++k) {
+            int from_allele = from_profile[k];
+            int to_allele   = to_profile[k];
+
+            if (to_allele > 0 && from_allele != to_allele) {
+                differences++;
+            }
+        }
+
+        return static_cast<double>(differences);
+    }
+
     // p-distance for DNA sequences
     double p_distance(
         const std::string& seq1,

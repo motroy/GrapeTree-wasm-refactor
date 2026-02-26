@@ -93,6 +93,11 @@ private:
                              // raw counts when calling contemporary()
     std::vector<double> distance_matrix_;
 
+    // Optional parallel matrix of raw allele-difference counts (numerators of
+    // the directional formula).  When non-empty, these values replace the
+    // normalized [0,1] ratios as branch lengths in the output edges.
+    std::vector<double> raw_distances_;
+
 public:
     // Preferred constructor: accepts an already-flat 1-D distance matrix
     // (row-major, size n*n) and takes ownership via move.  No extra copy.
@@ -100,6 +105,17 @@ public:
         : n_nodes_(n),
           n_loci_(n_loci > 0 ? n_loci : n),
           distance_matrix_(std::move(flat_distances)) {}
+
+    // Constructor with raw allele-difference matrix for correct branch lengths.
+    // flat_distances  – normalized [0,1] asymmetric ratios (used by algorithm)
+    // flat_raw        – raw allele-difference counts (used for output lengths)
+    MSTreeV2(std::vector<double>&& flat_distances,
+             std::vector<double>&& flat_raw,
+             int n, int n_loci = 0)
+        : n_nodes_(n),
+          n_loci_(n_loci > 0 ? n_loci : n),
+          distance_matrix_(std::move(flat_distances)),
+          raw_distances_(std::move(flat_raw)) {}
 
     // Convenience constructor from 2-D matrix (kept for compatibility).
     explicit MSTreeV2(
@@ -139,6 +155,16 @@ public:
 
         // Phase 4: Local branch recrafting (Algorithm 1, Zhou et al. 2018).
         recraft_branches(min_incoming);
+
+        // Phase 5: Replace normalized [0,1] ratios with raw allele-difference
+        // counts so that displayed branch lengths are true allelic distances.
+        // The algorithm uses the ratios internally; we only swap here, after
+        // all topology decisions are finalised.
+        if (!raw_distances_.empty()) {
+            for (Edge& e : min_incoming) {
+                e.distance = raw_distances_[e.from * n_nodes_ + e.to];
+            }
+        }
 
         if (progress_cb) progress_cb(100.0);
 
