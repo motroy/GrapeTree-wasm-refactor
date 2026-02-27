@@ -797,6 +797,18 @@
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-top:1rem;">
                     <div class="control-group">
+                        <label for="node-size">Node Size: <span id="node-size-val">10px</span></label>
+                        <input type="range" id="node-size" min="4" max="30" value="10" step="1"
+                               style="width:100%;margin-top:0.3rem;">
+                    </div>
+                    <div class="control-group">
+                        <label for="label-position">Label Position</label>
+                        <select id="label-position">
+                            <option value="outside" selected>Outside (right)</option>
+                            <option value="inside">Inside node</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
                         <label for="node-label-size">Node Label Size: <span id="node-label-size-val">10px</span></label>
                         <input type="range" id="node-label-size" min="6" max="28" value="10" step="1"
                                style="width:100%;margin-top:0.3rem;">
@@ -1418,6 +1430,19 @@
             }
         });
 
+        // Node size slider
+        const nodeSizeInput = document.getElementById('node-size');
+        const nodeSizeVal = document.getElementById('node-size-val');
+        nodeSizeInput.addEventListener('input', () => {
+            nodeSizeVal.textContent = nodeSizeInput.value + 'px';
+            if (currentTree) displayTree(currentTree);
+        });
+
+        // Label position dropdown
+        document.getElementById('label-position').addEventListener('change', () => {
+            if (currentTree) displayTree(currentTree);
+        });
+
         // Node label size slider
         const nodeLabelSizeInput = document.getElementById('node-label-size');
         const nodeLabelSizeVal = document.getElementById('node-label-size-val');
@@ -1801,11 +1826,8 @@
                 });
             }
 
-            // Nodes - original GrapeTree: radius = Math.pow(count, size_power) * base_node_size
-            // base_node_size=10, size_power=0.5; each node here represents one strain (count=1)
-            const BASE_NODE_SIZE = 10;
-            const SIZE_POWER = 0.5;
-            const nodeRadius = Math.max(4, Math.pow(1, SIZE_POWER) * BASE_NODE_SIZE);
+            // Node radius — controlled by the "Node Size" slider
+            const nodeRadius = parseInt(document.getElementById('node-size')?.value || 10);
 
             const nodes = currentData.strains.map((name, i) => ({ id: i, name: name }));
 
@@ -2106,14 +2128,17 @@
             });
 
             // Node labels — text determined by "Label Nodes By" selection
+            const labelPosition = document.getElementById('label-position')?.value || 'outside';
+            const labelInside = labelPosition === 'inside';
             const label = g.append('g')
                 .selectAll('text')
                 .data(nodes)
                 .join('text')
                 .attr('font-size', nodeLabelSize + 'px')
-                .attr('dx', nodeRadius + 3)
+                .attr('dx', labelInside ? 0 : nodeRadius + 3)
                 .attr('dy', '0.35em')
-                .style('fill', '#333')
+                .attr('text-anchor', labelInside ? 'middle' : 'start')
+                .style('fill', labelInside ? '#fff' : '#333')
                 .style('pointer-events', 'none')
                 .text(d => {
                     if (!labelColumn) return ''; // 'None'
