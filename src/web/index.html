@@ -319,6 +319,15 @@
             box-shadow: 0 2px 6px rgba(0,0,0,0.25);
         }
 
+        .legend-shape-swatch {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
         .legend-color-input {
             position: absolute;
             width: 1px;
@@ -769,6 +778,12 @@
                         </select>
                     </div>
                     <div class="control-group">
+                        <label for="shape-select">Node Shape By</label>
+                        <select id="shape-select" disabled>
+                            <option value="">None (Default)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
                         <label for="color-scheme-select">Color Scheme</label>
                         <select id="color-scheme-select">
                             <option value="schemeTableau10" selected>Tableau 10</option>
@@ -820,7 +835,7 @@
                     </div>
                 </div>
                 <div class="tab-hint">
-                    Load metadata in the <strong>Data</strong> tab to enable <em>Fill Color By</em> and <em>Ring Color By</em>.
+                    Load metadata in the <strong>Data</strong> tab to enable <em>Fill Color By</em>, <em>Ring Color By</em>, and <em>Node Shape By</em>.
                 </div>
             </div>
 
@@ -981,6 +996,7 @@
         const downloadHeatmapPngBtn = document.getElementById('download-heatmap-png-btn');
         const colorSelect = document.getElementById('color-select');
         const ringColorSelect = document.getElementById('ring-color-select');
+        const shapeSelect = document.getElementById('shape-select');
         const colorSchemeSelect = document.getElementById('color-scheme-select');
         const edgeScaleSelect = document.getElementById('edge-scale-select');
         const statusInfo = document.getElementById('status-info');
@@ -1039,11 +1055,12 @@
         function populateMetadataSelects(fields) {
             colorSelect.innerHTML = '<option value="">None (Default)</option>';
             ringColorSelect.innerHTML = '<option value="">None</option>';
+            shapeSelect.innerHTML = '<option value="">None (Default)</option>';
             // Preserve current label selection across re-populates
             const prevLabelVal = labelSelect.value;
             labelSelect.innerHTML = '<option value="name">Strain Name</option><option value="">None</option>';
             fields.forEach(field => {
-                [colorSelect, ringColorSelect, labelSelect].forEach(sel => {
+                [colorSelect, ringColorSelect, shapeSelect, labelSelect].forEach(sel => {
                     const option = document.createElement('option');
                     option.value = field;
                     option.textContent = field;
@@ -1057,6 +1074,7 @@
             const hasFields = fields.length > 0;
             colorSelect.disabled = !hasFields;
             ringColorSelect.disabled = !hasFields;
+            shapeSelect.disabled = !hasFields;
         }
 
         // Helper: resolve D3 color scheme by name
@@ -1414,6 +1432,10 @@
         ringColorSelect.addEventListener('change', () => {
             customRingColors = {};
             selectedClusters = new Set();
+            if (currentTree) displayTree(currentTree);
+        });
+
+        shapeSelect.addEventListener('change', () => {
             if (currentTree) displayTree(currentTree);
         });
 
@@ -1778,6 +1800,7 @@
             const hcSelectedLevel = hcLevelSelect ? hcLevelSelect.value : '';
             const hullClusterColumn = (hcSelectedLevel && currentHierCC) ? `HierCC_${hcSelectedLevel}` : null;
             const ringColumn = ringColorSelect.value;
+            const shapeColumn = shapeSelect.value;
             const labelColumn = labelSelect.value; // 'name', '', or a metadata field name
             const edgeScale = edgeScaleSelect.value;
             const colorScheme = getColorScheme();
@@ -1823,6 +1846,24 @@
                 const ringPalette = d3.scaleOrdinal(colorScheme).domain(Array.from(uniqueRingValues).sort());
                 Array.from(uniqueRingValues).sort().forEach((v, i) => {
                     ringColorMapping[v] = customRingColors[v] || ringPalette(v);
+                });
+            }
+
+            // Build shape mapping from metadata
+            // D3 symbol types cycled through for each unique metadata value
+            const SHAPE_PALETTE = [
+                d3.symbolCircle, d3.symbolSquare, d3.symbolTriangle,
+                d3.symbolDiamond, d3.symbolCross, d3.symbolStar,
+            ];
+            let shapeMapping = {};  // { metadataValue: d3SymbolType }
+            let uniqueShapeValues = new Set();
+            if (shapeColumn && currentMetadata) {
+                Object.keys(currentMetadata).forEach(strain => {
+                    const val = currentMetadata[strain] && currentMetadata[strain][shapeColumn];
+                    if (val) uniqueShapeValues.add(val);
+                });
+                Array.from(uniqueShapeValues).sort().forEach((v, i) => {
+                    shapeMapping[v] = SHAPE_PALETTE[i % SHAPE_PALETTE.length];
                 });
             }
 
@@ -2084,12 +2125,25 @@
                 return null;
             }
 
-            // --- Nodes (circles sized by count, like original GrapeTree) ---
+            // Helper: get the D3 symbol type for a node based on the shape column
+            function getNodeSymbolType(d) {
+                if (shapeColumn && currentMetadata && currentMetadata[d.name]) {
+                    const v = currentMetadata[d.name][shapeColumn];
+                    if (v && shapeMapping[v]) return shapeMapping[v];
+                }
+                return d3.symbolCircle;
+            }
+
+            // Pre-compute symbol path generator; area equivalent to a circle of nodeRadius
+            const symbolArea = Math.PI * nodeRadius * nodeRadius;
+            const symbolPath = d => d3.symbol().type(getNodeSymbolType(d)).size(symbolArea)();
+
+            // --- Nodes (shaped by metadata, sized by Node Size slider) ---
             const node = g.append('g').attr('class', 'node-group')
-                .selectAll('circle')
+                .selectAll('path')
                 .data(nodes)
-                .join('circle')
-                .attr('r', nodeRadius)
+                .join('path')
+                .attr('d', symbolPath)
                 .attr('fill', d => {
                     const v = nodeClusterValue(d);
                     if (v && colorMapping[v]) return colorMapping[v];
@@ -2123,6 +2177,10 @@
                 if (ringColumn && currentMetadata && currentMetadata[d.name]) {
                     const v = currentMetadata[d.name][ringColumn];
                     if (v) text += `\nRing (${ringColumn}): ${v}`;
+                }
+                if (shapeColumn && currentMetadata && currentMetadata[d.name]) {
+                    const v = currentMetadata[d.name][shapeColumn];
+                    if (v) text += `\nShape (${shapeColumn}): ${v}`;
                 }
                 return text;
             });
@@ -2168,8 +2226,7 @@
                     .attr('cy', d => d.y);
 
                 node
-                    .attr('cx', d => d.x)
-                    .attr('cy', d => d.y);
+                    .attr('transform', d => `translate(${d.x},${d.y})`);
 
                 label
                     .attr('x', d => d.x)
@@ -2198,6 +2255,7 @@
             // --- Legend with interactive color swatches and cluster selection ---
             const hasFill = selectedColumn && uniqueValues.size > 0;
             const hasRing = ringColumn && uniqueRingValues.size > 0;
+            const hasShape = shapeColumn && uniqueShapeValues.size > 0;
 
             // Build a count map for the fill column (used for cluster counts in legend)
             const fillValueCounts = {};
@@ -2208,7 +2266,15 @@
                 });
             }
 
-            if (hasFill || hasRing) {
+            // Pre-compute SVG path strings for each shape value (used in legend)
+            const shapePathStrings = {};
+            if (hasShape) {
+                Object.entries(shapeMapping).forEach(([val, symbolType]) => {
+                    shapePathStrings[val] = d3.symbol().type(symbolType).size(80)();
+                });
+            }
+
+            if (hasFill || hasRing || hasShape) {
                 const legend = document.createElement('div');
                 legend.className = 'legend';
                 // Restore saved position and size
@@ -2265,6 +2331,26 @@
                                      data-type="ring" data-value="${escapeAttr(value)}"
                                      style="border-color: ${color};">
                                     <input class="legend-color-input" type="color" value="${color}">
+                                </div>
+                                <div class="legend-label">${escapeAttr(String(value))}</div>
+                            </div>`;
+                    });
+                }
+
+                if (hasShape) {
+                    const titleText = (hasFill || hasRing)
+                        ? `<div class="legend-section-title" style="margin-top:10px;">Shape: ${escapeAttr(shapeColumn)}</div>`
+                        : `<div class="legend-title">${escapeAttr(shapeColumn)}</div>`;
+                    legendHTML += titleText;
+                    Array.from(uniqueShapeValues).sort().forEach(value => {
+                        const pathD = shapePathStrings[value] || '';
+                        legendHTML += `
+                            <div class="legend-item">
+                                <div class="legend-shape-swatch" title="${escapeAttr(String(value))}">
+                                    <svg width="16" height="16" style="display:block;">
+                                        <path transform="translate(8,8)" d="${pathD}"
+                                              fill="#555" stroke="#fff" stroke-width="1"></path>
+                                    </svg>
                                 </div>
                                 <div class="legend-label">${escapeAttr(String(value))}</div>
                             </div>`;
@@ -2349,7 +2435,7 @@
                             selectedClusters.add(value);
                         }
                         // Update node/ring opacity live without full re-render
-                        d3.select('#tree-canvas .node-group').selectAll('circle')
+                        d3.select('#tree-canvas .node-group').selectAll('path')
                             .attr('opacity', d => {
                                 if (selectedClusters.size === 0) return 1;
                                 const v = nodeClusterValue(d);
@@ -2413,7 +2499,7 @@
                         if (type === 'fill') {
                             customFillColors[value] = newColor;
                             swatch.style.backgroundColor = newColor;
-                            d3.select('#tree-canvas .node-group').selectAll('circle')
+                            d3.select('#tree-canvas .node-group').selectAll('path')
                                 .filter(d => d && currentMetadata && currentMetadata[d.name] &&
                                              currentMetadata[d.name][selectedColumn] === value)
                                 .attr('fill', newColor);
