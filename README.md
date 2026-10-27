@@ -48,6 +48,20 @@ python3 -m http.server 8000
 - ✅ Interactive web interface
 - 🚧 Neighbor-Joining (in progress)
 
+## Command-line rendering
+
+`tools/grapetree-render.mjs` drives the web app (the GitHub Pages deployment by default) in a headless browser and saves the tree as SVG or PNG:
+
+```bash
+cd tools && npm install && npx playwright install chromium
+node grapetree-render.mjs --profile data.profile --metadata meta.txt \
+  --color-by Country --out tree.svg
+node grapetree-render.mjs --profile data.profile --hc-level HC10 \
+  --shade-clusters --color-by HierCC --out tree.png --scale 3
+```
+
+Options: `--method`, `--hiercc FILE`, `--hc-level`, `--shade-clusters`, `--color-by`, `--scale`, `--url` (e.g. a local server), `--example`. The legend is not included in the output.
+
 ## Documentation
 
 See the full [refactoring plan](grapetree-wasm-refactor-plan.md) for architecture details and implementation roadmap.
