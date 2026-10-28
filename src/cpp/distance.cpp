@@ -157,6 +157,39 @@ public:
         return matrix;
     }
 
+    // Compute flat (1-D, row-major) symmetric both-present difference counts:
+    //   link[i][j] = #{l : π_l(i)≠0 ∧ π_l(j)≠0 ∧ π_l(i)≠π_l(j)}
+    // GrapeTree labels the branches of an MSTreeV2 tree with this count
+    // (symmetricLink in the original), not with the directed distance that was
+    // used to choose the branches.
+    std::vector<double> compute_symmetric_link_flat(
+        std::function<void(double)> progress_cb = nullptr
+    ) {
+        int n = data_.n_strains;
+        std::vector<double> matrix(static_cast<size_t>(n) * n, 0.0);
+
+        int report_frequency = std::max(1, n / 100);
+
+        for (int i = 0; i < n; ++i) {
+            if (progress_cb && i % report_frequency == 0) {
+                progress_cb(static_cast<double>(i) / n * 100.0);
+            }
+            for (int j = i + 1; j < n; ++j) {
+                int differences = 0;
+                for (int k = 0; k < data_.n_genes; ++k) {
+                    int a = data_.profiles[i][k];
+                    int b = data_.profiles[j][k];
+                    if (a > 0 && b > 0 && a != b) differences++;
+                }
+                matrix[static_cast<size_t>(i) * n + j] = differences;
+                matrix[static_cast<size_t>(j) * n + i] = differences;
+            }
+        }
+
+        if (progress_cb) progress_cb(100.0);
+        return matrix;
+    }
+
     // Compute flat (1-D, row-major) symmetric distance matrix.
     std::vector<double> compute_symmetric_flat(
         MissingHandler handler = IGNORE,

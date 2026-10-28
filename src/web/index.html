@@ -1276,6 +1276,23 @@
         function computeHierCCFromTree() {
             if (!currentTree || !currentData) return;
 
+            // An uploaded file wins: keep its assignments and only refresh what
+            // depends on the current strains (pHierCCval data, level selection).
+            if (hierccSource === 'uploaded' && currentHierCC) {
+                const prevLevel = currentHCLevel;
+                _populateHierCCPanel(null);
+                currentHierCCRaw = _buildRawFromUploadedHierCC(currentHierCC, currentData.strains);
+                currentSilhouetteScores = null;
+                currentNMIMatrix = HierCC.computeNMIMatrix(currentHierCCRaw);
+                _displayPHierCCvalPlots();
+                if (prevLevel && currentHierCC.hcLevels.includes(prevLevel)) {
+                    hcLevelSelect.value = prevLevel;
+                    currentHCLevel = prevLevel;
+                    applyHierCCLevel(prevLevel);
+                }
+                return;
+            }
+
             const rawResult = HierCC.compute(
                 currentTree.edges,
                 currentData.strains.length
