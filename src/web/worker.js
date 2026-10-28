@@ -32,7 +32,27 @@ function parseProfile(content) {
         strainColumnName = header[0].trim();
         // console.warn('Profile file header missing # prefix in first column');
     }
-    const geneNames = header.slice(1).map(s => s.trim());
+
+    // Locus columns: every column after the first except the ones GrapeTree
+    // itself leaves out - names starting with '#' and an ST / ST_id column,
+    // which holds a sequence-type label rather than a locus.
+    const locusColumns = [];
+    for (let col = 1; col < header.length; col++) {
+        const name = header[col].trim();
+        const lower = name.toLowerCase();
+        if (name.startsWith('#') || lower === 'st' || lower === 'st_id') continue;
+        locusColumns.push(col);
+    }
+    if (locusColumns.length === 0) {
+        throw new Error('No locus columns found in the profile header');
+    }
+    const geneNames = locusColumns.map(col => header[col].trim());
+
+    // Alleles are compared as labels, so each distinct label within a locus
+    // gets a positive id (in order of appearance).  Only 0, N, - (and empty or
+    // N/A) mean "missing"; anything else, including values such as -1, is an
+    // allele.
+    const alleleIds = locusColumns.map(() => new Map());
 
     // Parse data lines
     const strains = [];
@@ -50,13 +70,18 @@ function parseProfile(content) {
         }
 
         const strainName = fields[0].trim();
-        const profile = fields.slice(1).map(s => {
-            const val = s.trim();
-            // Convert missing data markers to 0
-            if (val === '-' || val === '' || val === 'N/A') {
+        const profile = locusColumns.map((col, k) => {
+            const val = fields[col].trim().toUpperCase();
+            if (val === '' || val === '0' || val === 'N' || val === '-' || val === 'N/A') {
                 return 0;
             }
-            return parseInt(val, 10) || 0;
+            const ids = alleleIds[k];
+            let id = ids.get(val);
+            if (id === undefined) {
+                id = ids.size + 1;
+                ids.set(val, id);
+            }
+            return id;
         });
 
         strains.push(strainName);
